@@ -49,13 +49,7 @@ class _RubricQuestion(BaseModel):
     partial_marking_rule: _PartialMarkingRule
 
 
-class _PaperMetadata(BaseModel):
-    total_questions: int
-    total_marks: int
-
-
 class _RubricSchema(BaseModel):
-    paper_metadata: _PaperMetadata
     questions: List[_RubricQuestion]
 
 
@@ -83,7 +77,7 @@ class RubricService:
         if not api_key:
             raise EnvironmentError("GEMINI_API_KEY environment variable not set.")
         self.client = genai.Client(api_key=api_key)
-        self.model = os.getenv("RUBRIC_MODEL", "gemini-3.1-flash-lite-preview")
+        self.model = os.getenv("RUBRIC_MODEL", "gemini-2.0-flash")
         self.system_prompt = _load_system_prompt()
 
     async def generate_rubric(self, parsed_paper: ParsedPaper) -> Rubric:
@@ -100,8 +94,6 @@ class RubricService:
         parsed = _RubricSchema.model_validate_json(response.text)
 
         return Rubric(
-            total_questions=parsed.paper_metadata.total_questions,
-            total_marks=parsed.paper_metadata.total_marks,
             questions=[
                 RubricQuestion(
                     question_id=q.question_id,

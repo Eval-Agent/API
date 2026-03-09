@@ -2,7 +2,7 @@ import json
 import aiosqlite
 from typing import Optional
 
-from models.schemas import ParsedPaper, Rubric, PaperSummary, PaperDetailResponse
+from models.schemas import ParsedPaper, Rubric, PaperSummary, PaperDetailResponse, build_rubric_response
 
 
 class PaperRepository:
@@ -101,10 +101,11 @@ class PaperRepository:
 
     # ------------------------------------------------------------------
     def _row_to_detail(self, row) -> PaperDetailResponse:
+        rubric = Rubric.model_validate_json(row["rubric"])
         return PaperDetailResponse(
             paper_id=row["paper_id"],
             sha256_hash=row["sha256_hash"],
             confirmed=bool(row["confirmed"]),
             parsed_paper=ParsedPaper.model_validate_json(row["parsed_paper"]),
-            rubric=Rubric.model_validate_json(row["rubric"]),
+            rubric=build_rubric_response(rubric),
         )

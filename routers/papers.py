@@ -12,6 +12,7 @@ from models.schemas import (
     PaperDeleteResponse,
     PaperSummary,
     PaperDetailResponse,
+    build_rubric_response,
 )
 
 router = APIRouter()
@@ -54,10 +55,9 @@ async def upload_paper(
             sha256_hash=sha256_hash,
             is_duplicate=True,
             parsed_paper=existing.parsed_paper,
-            rubric=existing.rubric,
+            rubric=build_rubric_response(existing.rubric),
             message="Duplicate detected. Returning existing paper.",
         )
-
     # ── New paper: OCR → Rubric ──────────────────────────────────────────────
     try:
         parsed_paper, rubric = await processor.process(pdf_bytes)
@@ -75,7 +75,7 @@ async def upload_paper(
         sha256_hash=sha256_hash,
         is_duplicate=False,
         parsed_paper=parsed_paper,
-        rubric=rubric,
+        rubric=build_rubric_response(rubric),
         message="Paper processed successfully. Please review and confirm.",
     )
 

@@ -64,9 +64,28 @@ class RubricQuestion(BaseModel):
 
 
 class Rubric(BaseModel):
-    total_questions: int
-    total_marks: int
+    """Internal storage model — no computed fields."""
     questions: List[RubricQuestion]
+
+
+class RubricResponse(BaseModel):
+    """
+    API response model.
+    total_questions and total_marks are computed in Python from the
+    questions list — Gemini is never asked to produce them.
+    """
+    total_questions: int
+    total_marks: float
+    questions: List[RubricQuestion]
+
+
+def build_rubric_response(rubric: Rubric) -> RubricResponse:
+    """Compute total_questions and total_marks from the questions list."""
+    return RubricResponse(
+        total_questions=len(rubric.questions),
+        total_marks=sum(q.total_marks for q in rubric.questions),
+        questions=rubric.questions,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +97,7 @@ class PaperUploadResponse(BaseModel):
     sha256_hash: str
     is_duplicate: bool
     parsed_paper: ParsedPaper
-    rubric: Rubric
+    rubric: RubricResponse
     message: str
 
 
@@ -111,7 +130,7 @@ class PaperDetailResponse(BaseModel):
     sha256_hash: str
     confirmed: bool
     parsed_paper: ParsedPaper
-    rubric: Rubric
+    rubric: RubricResponse
 
 
 class PaperDeleteResponse(BaseModel):
