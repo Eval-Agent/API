@@ -183,10 +183,18 @@ def build_evaluation_summary(
     )
 
 
+class ConceptEvaluation(BaseModel):
+    concept_name: str
+    marks_allocated: float
+    marks_awarded: float
+    reason: str
+
+
 class QuestionEvaluation(BaseModel):
     question_id: int
     maximum_marks: float
-    marks_awarded: float
+    marks_awarded: float          # computed: sum of concept marks_awarded
+    concept_evaluations: List[ConceptEvaluation]
     justification: str
     strengths: Optional[List[str]] = None
     areas_for_improvement: Optional[List[str]] = None

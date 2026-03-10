@@ -9,6 +9,7 @@ from models.schemas import (
     EvaluationReport,
     EvaluationSummary,
     QuestionEvaluation,
+    ConceptEvaluation,
     StudentInfo,
     Rubric,
     RubricResponse,
@@ -31,10 +32,17 @@ class _EvaluationSummary(BaseModel):
     overall_feedback: str
 
 
+class _ConceptEvaluation(BaseModel):
+    concept_name: str
+    marks_allocated: float
+    marks_awarded: float
+    reason: str
+
+
 class _QuestionEvaluation(BaseModel):
     question_id: int
     maximum_marks: float
-    marks_awarded: float
+    concept_evaluations: List[_ConceptEvaluation]
     justification: str
     strengths: Optional[List[str]] = None
     areas_for_improvement: Optional[List[str]] = None
@@ -117,7 +125,6 @@ def _build_evaluation_prompt(
             lines.append("*No rubric available for this question.*\n")
 
         lines.append("---\n")
-
     return "\n".join(lines)
 
 
@@ -139,12 +146,15 @@ class EvaluatorService:
         full_marks: float,
     ) -> EvaluationReport:
         prompt = _build_evaluation_prompt(parsed_paper, rubric, answers, student_info)
+        with open("eval_prompt.md", "w") as f:
+            f.write(prompt)
 
         response = self.client.models.generate_content(
             model=self.model,
             config=types.GenerateContentConfig(
-                thinking_config=types.ThinkingConfig(thinking_level="medium"),
                 system_instruction=self.system_prompt,
+                temperature=0,
+                thinking_config=types.ThinkingConfig(thinking_level="minimal"),
                 response_json_schema=_EvaluationReport.model_json_schema(),
             ),
             contents=prompt,
@@ -153,7 +163,24 @@ class EvaluatorService:
         parsed = _EvaluationReport.model_validate_json(response.text)
 
         question_wise = [
-            QuestionEvaluation(**qe.model_dump())
+            QuestionEvaluation(
+                question_id=qe.question_id,
+                maximum_marks=qe.maximum_marks,
+                concept_evaluations=[
+                    ConceptEvaluation(
+                        concept_name=c.concept_name,
+                        marks_allocated=c.marks_allocated,
+                        marks_awarded=c.marks_awarded,
+                        reason=c.reason,
+                    )
+                    for c in qe.concept_evaluations
+                ],
+                # marks_awarded is the sum of concept scores — not from Gemini
+                marks_awarded=sum(c.marks_awarded for c in qe.concept_evaluations),
+                justification=qe.justification,
+                strengths=qe.strengths,
+                areas_for_improvement=qe.areas_for_improvement,
+            )
             for qe in parsed.question_wise_evaluation
         ]
 
