@@ -73,11 +73,11 @@ def _load_system_prompt() -> str:
 
 class RubricService:
     def __init__(self):
-        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("api_key")
+        api_key = os.getenv("api_key")
         if not api_key:
             raise EnvironmentError("GEMINI_API_KEY environment variable not set.")
         self.client = genai.Client(api_key=api_key)
-        self.model = os.getenv("RUBRIC_MODEL", "gemini-2.0-flash")
+        self.model = os.getenv("RUBRIC_MODEL")
         self.system_prompt = _load_system_prompt()
 
     async def generate_rubric(self, parsed_paper: ParsedPaper) -> Rubric:

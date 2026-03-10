@@ -16,7 +16,14 @@ from models.schemas import (
 )
 
 router = APIRouter()
-processor = PaperProcessor()
+processor: PaperProcessor | None = None
+
+
+def get_processor() -> PaperProcessor:
+    global processor
+    if processor is None:
+        processor = PaperProcessor()
+    return processor
 
 
 # ---------------------------------------------------------------------------
@@ -60,7 +67,7 @@ async def upload_paper(
         )
     # ── New paper: OCR → Rubric ──────────────────────────────────────────────
     try:
-        parsed_paper, rubric = await processor.process(pdf_bytes)
+        parsed_paper, rubric = await get_processor().process(pdf_bytes)
     except Exception as exc:
         raise HTTPException(
             status_code=502,
