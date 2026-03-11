@@ -1,7 +1,8 @@
 # Python cache
 __pycache__/
-*.py[cod]
-*$py.class
+**/__pycache__/
+*.pyc
+*.pyo
 
 # Database files
 *.db
