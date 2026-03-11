@@ -1,3 +1,9 @@
+import os
+os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+os.environ["TRANSFORMERS_NO_TF"]  = "1"
+os.environ["USE_TF"]              = "0"
+os.environ["USE_TORCH"]           = "1"
+
 from dotenv import load_dotenv
 load_dotenv()  # Load .env before anything else reads os.getenv()
 

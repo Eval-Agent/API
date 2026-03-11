@@ -4,12 +4,14 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel
 from typing import List, Optional
+from enum import Enum
 
 from models.schemas import (
     EvaluationReport,
     EvaluationSummary,
     QuestionEvaluation,
     ConceptEvaluation,
+    ConceptVerdict,
     StudentInfo,
     Rubric,
     RubricResponse,
@@ -32,10 +34,16 @@ class _EvaluationSummary(BaseModel):
     overall_feedback: str
 
 
+class _ConceptVerdict(str, Enum):
+    correct   = "correct"
+    partial   = "partial"
+    incorrect = "incorrect"
+
+
 class _ConceptEvaluation(BaseModel):
+    """Gemini only judges the verdict — marks are computed in Python."""
     concept_name: str
-    marks_allocated: float
-    marks_awarded: float
+    verdict: _ConceptVerdict
     reason: str
 
 
@@ -59,13 +67,26 @@ class _EvaluationReport(BaseModel):
 _SYSTEM_PROMPT_PATH = Path("./instructions/eval_system_prompt.txt")
 
 _DEFAULT_SYSTEM_PROMPT = """
-You are an expert academic examiner. Evaluate each student answer strictly against the rubric provided.
-For every question:
-  - Award marks based on concepts covered, keywords used, and depth of explanation.
-  - Apply partial marking rules where appropriate.
-  - Provide a clear justification, list strengths, and suggest areas for improvement.
-Provide a short overall_feedback summarising the student's performance across all questions.
-Return structured JSON matching the schema provided.
+You are an expert university-level engineering examiner.
+Evaluate each student answer strictly against the rubric concepts provided.
+
+For every concept in each question:
+  - verdict: "correct" if the concept is clearly and accurately addressed.
+             "partial" if the concept is mentioned or partially addressed but lacks depth or accuracy.
+             "incorrect" if the concept is missing, wrong, or not addressed.
+  - If a concept is marked mandatory and is missing, verdict must be "incorrect".
+  - reason: one or two sentences referencing specific phrases from the student's answer. Do NOT hallucinate content not written by the student.
+
+For each question also provide:
+  - justification: brief overall reasoning for the question.
+  - strengths: list of positive aspects observed.
+  - areas_for_improvement: list of gaps or weaknesses.
+
+Finally provide:
+  - overall_feedback: short holistic summary of the student's performance across all questions.
+
+Do NOT produce any marks, scores, or totals — these are computed by the server.
+Output ONLY valid JSON matching the schema. No markdown, no code fences, no commentary.
 """.strip()
 
 
@@ -109,22 +130,18 @@ def _build_evaluation_prompt(
 
         lines.append("### Rubric")
         if rubric_q:
-            lines.append(f"**Expected Depth:** {rubric_q.expected_depth}")
-            lines.append(f"**Total Marks:** {rubric_q.total_marks}\n")
+            lines.append(f"**Expected Depth:** {rubric_q.expected_depth}\n")
             lines.append("#### Concepts")
             for concept in rubric_q.concepts:
                 lines.append(f"- **Concept:** {concept.concept_name}")
                 lines.append(f"  - Description: {concept.description}")
                 lines.append(f"  - Keywords: {', '.join(concept.keywords)}")
-                lines.append(f"  - Marks Allocated: {concept.marks_allocated}")
                 lines.append(f"  - Mandatory: {concept.mandatory}")
-            lines.append("\n#### Partial Marking Rules")
-            lines.append(f"- Keyword Only %: {rubric_q.partial_marking_rule.keyword_only_percentage}")
-            lines.append(f"- Partial Explanation %: {rubric_q.partial_marking_rule.partial_explanation_percentage}\n")
         else:
             lines.append("*No rubric available for this question.*\n")
 
         lines.append("---\n")
+
     return "\n".join(lines)
 
 
@@ -154,7 +171,9 @@ class EvaluatorService:
             config=types.GenerateContentConfig(
                 system_instruction=self.system_prompt,
                 temperature=0,
-                thinking_config=types.ThinkingConfig(thinking_level="minimal"),
+                top_p=0,
+                top_k=1,
+                seed=42,
                 response_json_schema=_EvaluationReport.model_json_schema(),
             ),
             contents=prompt,
@@ -162,27 +181,55 @@ class EvaluatorService:
 
         parsed = _EvaluationReport.model_validate_json(response.text)
 
-        question_wise = [
-            QuestionEvaluation(
-                question_id=qe.question_id,
-                maximum_marks=qe.maximum_marks,
-                concept_evaluations=[
-                    ConceptEvaluation(
-                        concept_name=c.concept_name,
-                        marks_allocated=c.marks_allocated,
-                        marks_awarded=c.marks_awarded,
-                        reason=c.reason,
-                    )
-                    for c in qe.concept_evaluations
-                ],
-                # marks_awarded is the sum of concept scores — not from Gemini
-                marks_awarded=sum(c.marks_awarded for c in qe.concept_evaluations),
-                justification=qe.justification,
-                strengths=qe.strengths,
-                areas_for_improvement=qe.areas_for_improvement,
+        # Build rubric lookups for deterministic mark computation
+        rubric_q_lookup = {rq.question_id: rq for rq in rubric.questions}
+
+        def _concept_marks(verdict: _ConceptVerdict, marks_allocated: float, partial_pct: float) -> float:
+            if verdict == _ConceptVerdict.correct:
+                return marks_allocated
+            elif verdict == _ConceptVerdict.partial:
+                return round(marks_allocated * partial_pct, 2)
+            else:
+                return 0.0
+
+        question_wise = []
+        for qe in parsed.question_wise_evaluation:
+            rubric_q   = rubric_q_lookup.get(qe.question_id)
+            partial_pct = (
+                rubric_q.partial_marking_rule.partial_explanation_percentage/100
+                if rubric_q else 0.5
             )
-            for qe in parsed.question_wise_evaluation
-        ]
+            concept_lookup = (
+                {c.concept_name: c.marks_allocated for c in rubric_q.concepts}
+                if rubric_q else {}
+            )
+
+            concept_evals = [
+                ConceptEvaluation(
+                    concept_name=c.concept_name,
+                    marks_allocated=concept_lookup.get(c.concept_name, 0.0),
+                    verdict=ConceptVerdict(c.verdict),
+                    reason=c.reason,
+                    marks_awarded=_concept_marks(
+                        c.verdict,
+                        concept_lookup.get(c.concept_name, 0.0),
+                        partial_pct,
+                    ),
+                )
+                for c in qe.concept_evaluations
+            ]
+
+            question_wise.append(
+                QuestionEvaluation(
+                    question_id=qe.question_id,
+                    maximum_marks=qe.maximum_marks,
+                    concept_evaluations=concept_evals,
+                    marks_awarded=sum(c.marks_awarded for c in concept_evals),
+                    justification=qe.justification,
+                    strengths=qe.strengths,
+                    areas_for_improvement=qe.areas_for_improvement,
+                )
+            )
 
         return EvaluationReport(
             student_info=StudentInfo(

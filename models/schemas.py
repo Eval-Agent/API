@@ -183,10 +183,17 @@ def build_evaluation_summary(
     )
 
 
+class ConceptVerdict(str, Enum):
+    correct   = "correct"
+    partial   = "partial"
+    incorrect = "incorrect"
+
+
 class ConceptEvaluation(BaseModel):
     concept_name: str
-    marks_allocated: float
-    marks_awarded: float
+    marks_allocated: float          # echoed from rubric
+    marks_awarded: float            # computed in Python from verdict + partial_marking_rule
+    verdict: ConceptVerdict
     reason: str
 
 
