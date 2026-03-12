@@ -6,16 +6,15 @@ from pydantic import BaseModel
 from typing import List, Optional
 from enum import Enum
 
-from models.schemas import (
+from models.rubric import Rubric, RubricResponse
+from models.paper import ParsedPaper
+from models.evaluation import (
     EvaluationReport,
     EvaluationSummary,
     QuestionEvaluation,
     ConceptEvaluation,
     ConceptVerdict,
     StudentInfo,
-    Rubric,
-    RubricResponse,
-    ParsedPaper,
     build_evaluation_summary,
 )
 
@@ -24,13 +23,8 @@ from models.schemas import (
 # Internal schema for LLM structured output
 # ---------------------------------------------------------------------------
 
-class _StudentInfo(BaseModel):
-    student_name: str
-    roll_number: Optional[str] = None
-
-
 class _EvaluationSummary(BaseModel):
-    """Gemini only generates the overall feedback — totals are computed in Python."""
+    """Gemini only generates overall_feedback — totals are computed in Python."""
     overall_feedback: str
 
 
@@ -57,7 +51,7 @@ class _QuestionEvaluation(BaseModel):
 
 
 class _EvaluationReport(BaseModel):
-    student_info: _StudentInfo
+    """student_info is omitted — already captured by OCR, not Gemini's responsibility."""
     evaluation_summary: _EvaluationSummary
     question_wise_evaluation: List[_QuestionEvaluation]
 
@@ -100,11 +94,10 @@ def _build_evaluation_prompt(
     parsed_paper: ParsedPaper,
     rubric: Rubric | RubricResponse,
     answers: list,
-    student_info: _StudentInfo,
+    student_info: StudentInfo,
 ) -> str:
     """
-    Builds the markdown prompt combining questions, rubric, and student answers —
-    mirrors the build_markdown_prompt() approach from flow.py.
+    Builds the markdown prompt combining questions, rubric, and student answers.
     """
     rubric_lookup = {q.question_id: q for q in rubric.questions}
     answer_lookup = {a.question_id: a.answer_markdown for a in answers}
@@ -145,6 +138,8 @@ def _build_evaluation_prompt(
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+
 class EvaluatorService:
     def __init__(self):
         api_key = os.getenv("GEMINI_API_KEY") or os.getenv("api_key")
@@ -159,19 +154,21 @@ class EvaluatorService:
         parsed_paper: ParsedPaper,
         rubric: Rubric | RubricResponse,
         answers: list,
-        student_info: _StudentInfo,
+        student_info: StudentInfo,
         full_marks: float,
     ) -> EvaluationReport:
         prompt = _build_evaluation_prompt(parsed_paper, rubric, answers, student_info)
+        with open("eval_prompt.md", "w") as f:
+            f.write(prompt)
 
         response = self.client.models.generate_content(
             model=self.model,
             config=types.GenerateContentConfig(
                 system_instruction=self.system_prompt,
-                # temperature=0,
-                # top_p=0,
-                # top_k=1,
-                # seed=84,
+                temperature=0,
+                top_p=0,
+                top_k=1,
+                seed=42,
                 response_json_schema=_EvaluationReport.model_json_schema(),
             ),
             contents=prompt,
@@ -182,7 +179,11 @@ class EvaluatorService:
         # Build rubric lookups for deterministic mark computation
         rubric_q_lookup = {rq.question_id: rq for rq in rubric.questions}
 
-        def _concept_marks(verdict: _ConceptVerdict, marks_allocated: float, partial_pct: float) -> float:
+        def _concept_marks(
+            verdict: _ConceptVerdict,
+            marks_allocated: float,
+            partial_pct: float,
+        ) -> float:
             if verdict == _ConceptVerdict.correct:
                 return marks_allocated
             elif verdict == _ConceptVerdict.partial:
@@ -192,9 +193,9 @@ class EvaluatorService:
 
         question_wise = []
         for qe in parsed.question_wise_evaluation:
-            rubric_q   = rubric_q_lookup.get(qe.question_id)
+            rubric_q    = rubric_q_lookup.get(qe.question_id)
             partial_pct = (
-                rubric_q.partial_marking_rule.partial_explanation_percentage/100
+                rubric_q.partial_marking_rule.partial_explanation_percentage / 100
                 if rubric_q else 0.5
             )
             concept_lookup = (
@@ -230,11 +231,8 @@ class EvaluatorService:
             )
 
         return EvaluationReport(
-            student_info=StudentInfo(
-                student_name=parsed.student_info.student_name,
-                roll_number=parsed.student_info.roll_number,
-            ),
-            extracted_answers=[],   # populated by the router after OCR
+            student_info=student_info,      # from OCR — not re-parsed from Gemini
+            extracted_answers=[],           # populated by the router after OCR
             evaluation_summary=build_evaluation_summary(
                 overall_feedback=parsed.evaluation_summary.overall_feedback,
                 question_wise_evaluation=question_wise,
