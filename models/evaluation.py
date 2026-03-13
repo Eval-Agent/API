@@ -156,6 +156,11 @@ class OcrDeleteResponse(BaseModel):
     message: str
 
 
+class OcrStudentInfoUpdateRequest(BaseModel):
+    student_name: str
+    roll_number: Optional[str] = None
+
+
 class OcrSummaryResponse(BaseModel):
     """Returned in the OCR list view — one row per uploaded answer sheet."""
     ocr_id: str

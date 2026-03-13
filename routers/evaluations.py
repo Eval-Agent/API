@@ -13,6 +13,7 @@ from models.schemas import (
     OcrResponse,
     OcrDeleteResponse,
     OcrSummaryResponse,
+    OcrStudentInfoUpdateRequest,
     EvaluateRequest,
     EvaluationResponse,
     EvaluationSummaryResponse,
@@ -321,6 +322,52 @@ async def get_ocr_result(
         student_info=student_info,
         extracted_answers=extracted_answers,
         message="OCR result retrieved successfully.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# PATCH /ocr/detail/{ocr_id}/student-info  — correct student name / roll no
+# ---------------------------------------------------------------------------
+
+@router.patch(
+    "/ocr/detail/{ocr_id}/student-info",
+    response_model=OcrResponse,
+    summary="Update student info on an OCR result",
+    description=(
+        "Allows the examiner to correct the student name and/or roll number "
+        "that was extracted by OCR. Returns the full updated OCR record."
+    ),
+)
+async def update_ocr_student_info(
+    ocr_id: str,
+    body: OcrStudentInfoUpdateRequest,
+    db: aiosqlite.Connection = Depends(get_db),
+):
+    ocr_repo = OcrRepository(db)
+
+    record = await ocr_repo.find_by_id(ocr_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="OCR result not found.")
+
+    updated_info = StudentInfo(
+        student_name=body.student_name,
+        roll_number=body.roll_number,
+    )
+    await ocr_repo.update_student_info(ocr_id, updated_info)
+
+    extracted_answers = [
+        ExtractedAnswer(**a)
+        for a in json.loads(record["extracted_answers"])
+    ]
+
+    return OcrResponse(
+        ocr_id=record["ocr_id"],
+        paper_id=record["paper_id"],
+        answer_sha256=record["answer_sha256"],
+        is_duplicate=False,
+        student_info=updated_info,
+        extracted_answers=extracted_answers,
+        message="Student info updated successfully.",
     )
 
 

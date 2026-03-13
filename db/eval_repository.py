@@ -69,6 +69,14 @@ class OcrRepository:
             await self.db.commit()
             return cursor.rowcount > 0
 
+    async def update_student_info(self, ocr_id: str, student_info: StudentInfo) -> bool:
+        async with self.db.execute(
+            "UPDATE ocr_results SET student_info = ? WHERE ocr_id = ?",
+            (student_info.model_dump_json(), ocr_id),
+        ) as cursor:
+            await self.db.commit()
+            return cursor.rowcount > 0
+
     async def list_by_paper(self, paper_id: str) -> list[OcrSummaryResponse]:
         """List all OCR results for a paper, flagging which ones already have an evaluation."""
         async with self.db.execute(
