@@ -114,3 +114,5 @@ class PaperDetailResponse(BaseModel):
 class PaperDeleteResponse(BaseModel):
     paper_id: str
     message: str
+    ocr_results_deleted: int = 0
+    evaluations_deleted: int = 0

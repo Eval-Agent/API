@@ -99,13 +99,24 @@ class PaperRepository:
                 )
             return summaries
 
-    async def delete(self, paper_id: str) -> bool:
-        """Delete a paper by ID. Returns True if a row was deleted, False if not found."""
+    async def delete(self, paper_id: str) -> dict:
+        """Delete a paper and cascade to ocr_results and evaluations.
+        Returns counts of deleted rows for each table."""
+        # Count children before deletion for the response
         async with self.db.execute(
-            "DELETE FROM papers WHERE paper_id = ?", (paper_id,)
-        ) as cursor:
-            await self.db.commit()
-            return cursor.rowcount > 0
+            "SELECT COUNT(*) FROM evaluations WHERE paper_id = ?", (paper_id,)
+        ) as cur:
+            eval_count = (await cur.fetchone())[0]
+
+        async with self.db.execute(
+            "SELECT COUNT(*) FROM ocr_results WHERE paper_id = ?", (paper_id,)
+        ) as cur:
+            ocr_count = (await cur.fetchone())[0]
+
+        await self.db.execute("DELETE FROM papers WHERE paper_id = ?", (paper_id,))
+        await self.db.commit()
+
+        return {"ocr_results_deleted": ocr_count, "evaluations_deleted": eval_count}
 
     # ------------------------------------------------------------------
     def _row_to_detail(self, row) -> PaperDetailResponse:

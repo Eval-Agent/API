@@ -226,9 +226,21 @@ async def delete_paper(
     if not existing:
         raise HTTPException(status_code=404, detail="Paper not found.")
 
-    await repo.delete(paper_id)
+    counts = await repo.delete(paper_id)
+
+    deleted_parts = []
+    if counts["ocr_results_deleted"]:
+        deleted_parts.append(f"{counts['ocr_results_deleted']} answer sheet(s)")
+    if counts["evaluations_deleted"]:
+        deleted_parts.append(f"{counts['evaluations_deleted']} evaluation(s)")
+
+    message = "Paper deleted successfully."
+    if deleted_parts:
+        message += f" Also removed: {', '.join(deleted_parts)}."
 
     return PaperDeleteResponse(
         paper_id=paper_id,
-        message="Paper deleted successfully.",
+        message=message,
+        ocr_results_deleted=counts["ocr_results_deleted"],
+        evaluations_deleted=counts["evaluations_deleted"],
     )
