@@ -1,7 +1,19 @@
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
+from enum import Enum
 
 from models.rubric import Rubric, RubricResponse
+
+
+# ---------------------------------------------------------------------------
+# Strictness
+# ---------------------------------------------------------------------------
+
+class Strictness(str, Enum):
+    easy    = "easy"
+    medium  = "medium"
+    hard    = "hard"
+    extreme = "extreme"
 
 
 # ---------------------------------------------------------------------------
@@ -35,11 +47,33 @@ class ParsedPaper(BaseModel):
 # Paper API Request / Response Models
 # ---------------------------------------------------------------------------
 
-class PaperUploadResponse(BaseModel):
+class PaperOcrResponse(BaseModel):
+    """Returned after POST /upload — OCR only, no rubric yet."""
     paper_id: str
     sha256_hash: str
     is_duplicate: bool
     parsed_paper: ParsedPaper
+    message: str
+
+
+class PaperUploadResponse(BaseModel):
+    """Kept for backwards compatibility. rubric is None until generated."""
+    paper_id: str
+    sha256_hash: str
+    is_duplicate: bool
+    parsed_paper: ParsedPaper
+    rubric: Optional[RubricResponse] = None
+    message: str
+
+
+class RubricGenerateRequest(BaseModel):
+    paper_id: str
+    strictness: Strictness = Strictness.medium
+
+
+class RubricGenerateResponse(BaseModel):
+    paper_id: str
+    strictness: Strictness
     rubric: RubricResponse
     message: str
 
@@ -66,6 +100,7 @@ class PaperSummary(BaseModel):
     subject_code: str
     exam_type: str
     confirmed: bool
+    has_rubric: bool
 
 
 class PaperDetailResponse(BaseModel):
@@ -73,7 +108,7 @@ class PaperDetailResponse(BaseModel):
     sha256_hash: str
     confirmed: bool
     parsed_paper: ParsedPaper
-    rubric: RubricResponse
+    rubric: Optional[RubricResponse] = None
 
 
 class PaperDeleteResponse(BaseModel):

@@ -4,9 +4,14 @@ import aiosqlite
 
 from db.database import get_db
 from db.repository import PaperRepository
-from services.paper_processor import PaperProcessor, compute_sha256, generate_paper_id
+from services.ocr_service import OCRService
+from services.rubric_service import RubricService
+from services.paper_processor import compute_sha256, generate_paper_id
 from models.schemas import (
+    PaperOcrResponse,
     PaperUploadResponse,
+    RubricGenerateRequest,
+    RubricGenerateResponse,
     PaperConfirmRequest,
     PaperConfirmResponse,
     PaperDeleteResponse,
@@ -16,28 +21,22 @@ from models.schemas import (
 )
 
 router = APIRouter()
-processor: PaperProcessor | None = None
-
-
-def get_processor() -> PaperProcessor:
-    global processor
-    if processor is None:
-        processor = PaperProcessor()
-    return processor
+_ocr_svc    = OCRService()
+_rubric_svc = RubricService()
 
 
 # ---------------------------------------------------------------------------
-# POST /upload
+# POST /upload  — Step 1: OCR only
 # ---------------------------------------------------------------------------
 
 @router.post(
     "/upload",
-    response_model=PaperUploadResponse,
-    summary="Upload a question paper PDF",
+    response_model=PaperOcrResponse,
+    summary="Upload a question paper PDF (OCR only)",
     description=(
-        "Accepts a question paper PDF. Computes its SHA-256 hash and checks for duplicates. "
-        "If new, runs OCR and rubric generation. Returns parsed paper + rubric for review. "
-        "Call /confirm after the user reviews."
+        "Accepts a question paper PDF, runs OCR to extract questions and metadata. "
+        "No rubric is generated yet. Returns paper_id and parsed_paper. "
+        "Call /generate-rubric next with the desired strictness level."
     ),
 )
 async def upload_paper(
@@ -57,33 +56,79 @@ async def upload_paper(
     # ── Duplicate check ──────────────────────────────────────────────────────
     existing = await repo.find_by_hash(sha256_hash)
     if existing:
-        return PaperUploadResponse(
+        return PaperOcrResponse(
             paper_id=existing.paper_id,
             sha256_hash=sha256_hash,
             is_duplicate=True,
             parsed_paper=existing.parsed_paper,
-            rubric=build_rubric_response(existing.rubric),
-            message="Duplicate detected. Returning existing paper.",
+            message=(
+                "This paper was already uploaded. "
+                "You may call /generate-rubric again with a different strictness, or proceed to confirm."
+            ),
         )
-    # ── New paper: OCR → Rubric ──────────────────────────────────────────────
+
+    # ── New paper: OCR only ──────────────────────────────────────────────────
     try:
-        parsed_paper, rubric = await get_processor().process(pdf_bytes)
+        parsed_paper = await _ocr_svc.extract_questions(pdf_bytes)
     except Exception as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"AI processing failed: {str(exc)}",
-        )
+        raise HTTPException(status_code=502, detail=f"OCR failed: {str(exc)}")
 
     paper_id = generate_paper_id()
-    await repo.insert(paper_id, sha256_hash, parsed_paper, rubric)
+    await repo.insert(paper_id, sha256_hash, parsed_paper, rubric=None)
 
-    return PaperUploadResponse(
+    return PaperOcrResponse(
         paper_id=paper_id,
         sha256_hash=sha256_hash,
         is_duplicate=False,
         parsed_paper=parsed_paper,
+        message="OCR complete. Call /generate-rubric with strictness to generate the marking rubric.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /generate-rubric  — Step 2: Rubric generation with strictness
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/generate-rubric",
+    response_model=RubricGenerateResponse,
+    summary="Generate rubric for an OCR'd paper",
+    description=(
+        "Generates a marking rubric for a paper that has already been OCR'd. "
+        "Select a strictness level: easy, medium, hard, or extreme. "
+        "Can be called multiple times to regenerate with a different strictness. "
+        "Call /confirm after reviewing the rubric."
+    ),
+)
+async def generate_rubric(
+    body: RubricGenerateRequest,
+    db: aiosqlite.Connection = Depends(get_db),
+):
+    repo = PaperRepository(db)
+    paper = await repo.find_by_id(body.paper_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found.")
+    if paper.confirmed:
+        raise HTTPException(
+            status_code=409,
+            detail="Paper is already confirmed. Cannot regenerate rubric.",
+        )
+
+    try:
+        rubric = await _rubric_svc.generate_rubric(
+            parsed_paper=paper.parsed_paper,
+            strictness=body.strictness,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Rubric generation failed: {str(exc)}")
+
+    await repo.update_rubric(body.paper_id, rubric)
+
+    return RubricGenerateResponse(
+        paper_id=body.paper_id,
+        strictness=body.strictness,
         rubric=build_rubric_response(rubric),
-        message="Paper processed successfully. Please review and confirm.",
+        message=f"Rubric generated with '{body.strictness}' strictness. Review and confirm when ready.",
     )
 
 
@@ -108,9 +153,13 @@ async def confirm_paper(
     existing = await repo.find_by_id(body.paper_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Paper not found.")
-
     if existing.confirmed:
         raise HTTPException(status_code=409, detail="Paper is already confirmed.")
+    if existing.rubric is None:
+        raise HTTPException(
+            status_code=400,
+            detail="No rubric found for this paper. Call /generate-rubric before confirming.",
+        )
 
     await repo.confirm(body.paper_id, body.parsed_paper, body.rubric)
 

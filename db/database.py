@@ -12,7 +12,7 @@ async def init_db():
                 paper_id     TEXT PRIMARY KEY,
                 sha256_hash  TEXT UNIQUE NOT NULL,
                 parsed_paper TEXT NOT NULL,
-                rubric       TEXT NOT NULL,
+                rubric       TEXT,
                 confirmed    INTEGER NOT NULL DEFAULT 0,
                 created_at   TEXT NOT NULL DEFAULT (datetime('now'))
             )
@@ -40,12 +40,37 @@ async def init_db():
             )
         """)
 
+        # ── Migration: make rubric column nullable on existing papers table ───
+        # SQLite cannot ALTER COLUMN, so we rebuild the table if needed.
+        papers_cols = {
+            row[1]: row[3]  # name: notnull
+            async for row in await db.execute("PRAGMA table_info(papers)")
+        }
+        if papers_cols.get("rubric") == 1:  # 1 = NOT NULL constraint present
+            await db.execute("ALTER TABLE papers RENAME TO papers_old")
+            await db.execute("""
+                CREATE TABLE papers (
+                    paper_id     TEXT PRIMARY KEY,
+                    sha256_hash  TEXT UNIQUE NOT NULL,
+                    parsed_paper TEXT NOT NULL,
+                    rubric       TEXT,
+                    confirmed    INTEGER NOT NULL DEFAULT 0,
+                    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+            """)
+            await db.execute("""
+                INSERT INTO papers (paper_id, sha256_hash, parsed_paper, rubric, confirmed, created_at)
+                SELECT paper_id, sha256_hash, parsed_paper, rubric, confirmed, created_at
+                FROM papers_old
+            """)
+            await db.execute("DROP TABLE papers_old")
+
         # ── Migration: add ocr_id column to existing evaluations table ───────
-        existing_cols = [
+        eval_cols = [
             row[1]
             async for row in await db.execute("PRAGMA table_info(evaluations)")
         ]
-        if "ocr_id" not in existing_cols:
+        if "ocr_id" not in eval_cols:
             await db.execute(
                 "ALTER TABLE evaluations ADD COLUMN ocr_id TEXT REFERENCES ocr_results(ocr_id)"
             )

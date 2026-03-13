@@ -32,7 +32,7 @@ class PaperRepository:
         paper_id: str,
         sha256_hash: str,
         parsed_paper: ParsedPaper,
-        rubric: Rubric,
+        rubric: Optional[Rubric] = None,
     ) -> None:
         await self.db.execute(
             """
@@ -43,8 +43,15 @@ class PaperRepository:
                 paper_id,
                 sha256_hash,
                 parsed_paper.model_dump_json(),
-                rubric.model_dump_json(),
+                rubric.model_dump_json() if rubric else None,
             ),
+        )
+        await self.db.commit()
+
+    async def update_rubric(self, paper_id: str, rubric: Rubric) -> None:
+        await self.db.execute(
+            "UPDATE papers SET rubric = ? WHERE paper_id = ?",
+            (rubric.model_dump_json(), paper_id),
         )
         await self.db.commit()
 
@@ -73,7 +80,7 @@ class PaperRepository:
 
     async def list_all(self) -> list[PaperSummary]:
         async with self.db.execute(
-            "SELECT paper_id, sha256_hash, parsed_paper, confirmed FROM papers ORDER BY created_at DESC"
+            "SELECT paper_id, sha256_hash, parsed_paper, rubric, confirmed FROM papers ORDER BY created_at DESC"
         ) as cursor:
             rows = await cursor.fetchall()
             summaries = []
@@ -87,6 +94,7 @@ class PaperRepository:
                         subject_code=paper.metadata.subject_code,
                         exam_type=paper.metadata.exam_type,
                         confirmed=bool(row["confirmed"]),
+                        has_rubric=row["rubric"] is not None,
                     )
                 )
             return summaries
@@ -101,11 +109,15 @@ class PaperRepository:
 
     # ------------------------------------------------------------------
     def _row_to_detail(self, row) -> PaperDetailResponse:
-        rubric = Rubric.model_validate_json(row["rubric"])
+        rubric_json = row["rubric"]
+        rubric_response = None
+        if rubric_json:
+            rubric = Rubric.model_validate_json(rubric_json)
+            rubric_response = build_rubric_response(rubric)
         return PaperDetailResponse(
             paper_id=row["paper_id"],
             sha256_hash=row["sha256_hash"],
             confirmed=bool(row["confirmed"]),
             parsed_paper=ParsedPaper.model_validate_json(row["parsed_paper"]),
-            rubric=build_rubric_response(rubric),
+            rubric=rubric_response,
         )
