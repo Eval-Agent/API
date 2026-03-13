@@ -69,7 +69,7 @@ _STRICTNESS_INSTRUCTIONS = {
     Strictness.easy: (
         "STRICTNESS: EASY — Be lenient. Award marks generously. "
         "Partial credit should be given for any reasonable attempt. "
-        "Set keyword_only_percentage to 0.75 and partial_explanation_percentage to 0.90. "
+        "Set keyword_only_percentage to 0.75 and partial_explanation_percentage to 1.00. "
         "Mark few concepts as mandatory. Accept informal or incomplete explanations."
     ),
     Strictness.medium: (

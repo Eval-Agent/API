@@ -1,5 +1,4 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
-from fastapi.responses import JSONResponse
 import aiosqlite
 
 from db.database import get_db
@@ -9,7 +8,6 @@ from services.rubric_service import RubricService
 from services.paper_processor import compute_sha256, generate_paper_id
 from models.schemas import (
     PaperOcrResponse,
-    PaperUploadResponse,
     RubricGenerateRequest,
     RubricGenerateResponse,
     PaperConfirmRequest,
@@ -26,17 +24,17 @@ _rubric_svc = RubricService()
 
 
 # ---------------------------------------------------------------------------
-# POST /upload  — Step 1: OCR only
+# POST /papers   — Step 1: upload PDF, run OCR, return parsed paper
 # ---------------------------------------------------------------------------
 
 @router.post(
-    "/upload",
+    "",
     response_model=PaperOcrResponse,
-    summary="Upload a question paper PDF (OCR only)",
+    summary="Upload a question paper PDF",
     description=(
-        "Accepts a question paper PDF, runs OCR to extract questions and metadata. "
-        "No rubric is generated yet. Returns paper_id and parsed_paper. "
-        "Call /generate-rubric next with the desired strictness level."
+        "Accepts a question paper PDF and runs OCR to extract questions and "
+        "metadata. No rubric is generated yet. Returns paper_id and parsed_paper. "
+        "Call /papers/{paper_id}/rubric:generate next with the desired strictness."
     ),
 )
 async def upload_paper(
@@ -53,7 +51,6 @@ async def upload_paper(
     sha256_hash = compute_sha256(pdf_bytes)
     repo = PaperRepository(db)
 
-    # ── Duplicate check ──────────────────────────────────────────────────────
     existing = await repo.find_by_hash(sha256_hash)
     if existing:
         return PaperOcrResponse(
@@ -63,11 +60,11 @@ async def upload_paper(
             parsed_paper=existing.parsed_paper,
             message=(
                 "This paper was already uploaded. "
-                "You may call /generate-rubric again with a different strictness, or proceed to confirm."
+                "You may call /papers/{paper_id}/rubric:generate again with a "
+                "different strictness, or proceed to confirm."
             ),
         )
 
-    # ── New paper: OCR only ──────────────────────────────────────────────────
     try:
         parsed_paper = await _ocr_svc.extract_questions(pdf_bytes)
     except Exception as exc:
@@ -81,31 +78,35 @@ async def upload_paper(
         sha256_hash=sha256_hash,
         is_duplicate=False,
         parsed_paper=parsed_paper,
-        message="OCR complete. Call /generate-rubric with strictness to generate the marking rubric.",
+        message=(
+            "OCR complete. Call /papers/{paper_id}/rubric:generate with a "
+            "strictness level to generate the marking rubric."
+        ),
     )
 
 
 # ---------------------------------------------------------------------------
-# POST /generate-rubric  — Step 2: Rubric generation with strictness
+# POST /papers/{paper_id}/rubric:generate   — Step 2: generate rubric
 # ---------------------------------------------------------------------------
 
 @router.post(
-    "/generate-rubric",
+    "/{paper_id}/rubric:generate",
     response_model=RubricGenerateResponse,
-    summary="Generate rubric for an OCR'd paper",
+    summary="Generate a marking rubric for a paper",
     description=(
-        "Generates a marking rubric for a paper that has already been OCR'd. "
+        "Generates a marking rubric for an OCR'd paper. "
         "Select a strictness level: easy, medium, hard, or extreme. "
         "Can be called multiple times to regenerate with a different strictness. "
-        "Call /confirm after reviewing the rubric."
+        "Call /papers/{paper_id}:confirm after reviewing."
     ),
 )
 async def generate_rubric(
+    paper_id: str,
     body: RubricGenerateRequest,
     db: aiosqlite.Connection = Depends(get_db),
 ):
     repo = PaperRepository(db)
-    paper = await repo.find_by_id(body.paper_id)
+    paper = await repo.find_by_id(paper_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found.")
     if paper.confirmed:
@@ -122,10 +123,10 @@ async def generate_rubric(
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Rubric generation failed: {str(exc)}")
 
-    await repo.update_rubric(body.paper_id, rubric)
+    await repo.update_rubric(paper_id, rubric)
 
     return RubricGenerateResponse(
-        paper_id=body.paper_id,
+        paper_id=paper_id,
         strictness=body.strictness,
         rubric=build_rubric_response(rubric),
         message=f"Rubric generated with '{body.strictness}' strictness. Review and confirm when ready.",
@@ -133,24 +134,26 @@ async def generate_rubric(
 
 
 # ---------------------------------------------------------------------------
-# POST /confirm
+# POST /papers/{paper_id}:confirm   — Step 3: confirm paper + rubric
 # ---------------------------------------------------------------------------
 
 @router.post(
-    "/confirm",
+    "/{paper_id}:confirm",
     response_model=PaperConfirmResponse,
-    summary="Confirm (and optionally edit) the parsed paper + rubric",
+    summary="Confirm the parsed paper and rubric",
     description=(
-        "After the user reviews the AI output, send the final (possibly edited) "
-        "paper and rubric here to persist them as confirmed."
+        "Finalises a paper after the examiner reviews and optionally edits "
+        "the parsed questions and rubric. Marks the paper as confirmed. "
+        "A rubric must have been generated before confirming."
     ),
 )
 async def confirm_paper(
+    paper_id: str,
     body: PaperConfirmRequest,
     db: aiosqlite.Connection = Depends(get_db),
 ):
     repo = PaperRepository(db)
-    existing = await repo.find_by_id(body.paper_id)
+    existing = await repo.find_by_id(paper_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Paper not found.")
     if existing.confirmed:
@@ -158,23 +161,23 @@ async def confirm_paper(
     if existing.rubric is None:
         raise HTTPException(
             status_code=400,
-            detail="No rubric found for this paper. Call /generate-rubric before confirming.",
+            detail="No rubric found. Call /papers/{paper_id}/rubric:generate before confirming.",
         )
 
-    await repo.confirm(body.paper_id, body.parsed_paper, body.rubric)
+    await repo.confirm(paper_id, body.parsed_paper, body.rubric)
 
     return PaperConfirmResponse(
-        paper_id=body.paper_id,
+        paper_id=paper_id,
         message="Paper confirmed and saved successfully.",
     )
 
 
 # ---------------------------------------------------------------------------
-# GET /
+# GET /papers
 # ---------------------------------------------------------------------------
 
 @router.get(
-    "/",
+    "",
     response_model=list[PaperSummary],
     summary="List all uploaded papers",
 )
@@ -184,7 +187,7 @@ async def list_papers(db: aiosqlite.Connection = Depends(get_db)):
 
 
 # ---------------------------------------------------------------------------
-# GET /{paper_id}
+# GET /papers/{paper_id}
 # ---------------------------------------------------------------------------
 
 @router.get(
@@ -204,17 +207,16 @@ async def get_paper(
 
 
 # ---------------------------------------------------------------------------
-# DELETE /{paper_id}
+# DELETE /papers/{paper_id}
 # ---------------------------------------------------------------------------
 
 @router.delete(
     "/{paper_id}",
     response_model=PaperDeleteResponse,
-    summary="Delete a paper from the database",
+    summary="Delete a paper and all linked data",
     description=(
-        "Permanently removes a paper and its rubric from the database. "
-        "Both confirmed and unconfirmed papers can be deleted. "
-        "This action is irreversible."
+        "Permanently removes a paper, its rubric, all linked submissions, "
+        "and all evaluations. This action is irreversible."
     ),
 )
 async def delete_paper(
@@ -230,7 +232,7 @@ async def delete_paper(
 
     deleted_parts = []
     if counts["ocr_results_deleted"]:
-        deleted_parts.append(f"{counts['ocr_results_deleted']} answer sheet(s)")
+        deleted_parts.append(f"{counts['ocr_results_deleted']} submission(s)")
     if counts["evaluations_deleted"]:
         deleted_parts.append(f"{counts['evaluations_deleted']} evaluation(s)")
 

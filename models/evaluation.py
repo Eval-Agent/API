@@ -4,7 +4,7 @@ from enum import Enum
 
 
 # ---------------------------------------------------------------------------
-# Evaluation Core Models
+# Core Models
 # ---------------------------------------------------------------------------
 
 class StudentInfo(BaseModel):
@@ -33,8 +33,8 @@ class ConceptVerdict(str, Enum):
 
 class ConceptEvaluation(BaseModel):
     concept_name: str
-    marks_allocated: float   # echoed from rubric
-    marks_awarded: float     # computed in Python from verdict + partial_marking_rule
+    marks_allocated: float
+    marks_awarded: float
     verdict: ConceptVerdict
     reason: str
 
@@ -42,7 +42,7 @@ class ConceptEvaluation(BaseModel):
 class QuestionEvaluation(BaseModel):
     question_id: int
     maximum_marks: float
-    marks_awarded: float     # computed: sum of concept marks_awarded
+    marks_awarded: float
     concept_evaluations: List[ConceptEvaluation]
     justification: str
     strengths: Optional[List[str]] = None
@@ -64,7 +64,7 @@ class EvaluationReport(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Evaluation Helpers
+# Helpers
 # ---------------------------------------------------------------------------
 
 def build_evaluation_summary(
@@ -72,12 +72,6 @@ def build_evaluation_summary(
     question_wise_evaluation: list,
     full_marks: float,
 ) -> EvaluationSummary:
-    """
-    Compute summary fields from graded questions and paper metadata.
-    - total_attempted     : sum of maximum_marks for answered questions
-    - total_marks_awarded : sum of marks_awarded across answered questions
-    - percentage          : (total_marks_awarded / full_marks) * 100
-    """
     total_attempted = sum(q.maximum_marks for q in question_wise_evaluation)
     total_awarded   = sum(q.marks_awarded  for q in question_wise_evaluation)
     percentage      = round((total_awarded / full_marks * 100), 2) if full_marks > 0 else 0.0
@@ -91,12 +85,12 @@ def build_evaluation_summary(
 
 
 # ---------------------------------------------------------------------------
-# Evaluation API Request / Response Models
+# Submission API models  (the OCR step, exposed as "submissions" in the API)
 # ---------------------------------------------------------------------------
 
-class OcrResponse(BaseModel):
-    """Returned after POST /evaluations/ocr."""
-    ocr_id: str
+class SubmissionResponse(BaseModel):
+    """Returned after POST /papers/{paper_id}/submissions."""
+    submission_id: str
     paper_id: str
     answer_sha256: str
     is_duplicate: bool
@@ -105,15 +99,41 @@ class OcrResponse(BaseModel):
     message: str
 
 
+class SubmissionSummaryResponse(BaseModel):
+    """Returned in list view — one row per uploaded answer sheet."""
+    submission_id: str
+    paper_id: str
+    answer_sha256: str
+    student_name: str
+    roll_number: Optional[str]
+    has_evaluation: bool
+    created_at: str
+
+
+class SubmissionStudentInfoUpdateRequest(BaseModel):
+    student_name: str
+    roll_number: Optional[str] = None
+
+
+class SubmissionDeleteResponse(BaseModel):
+    submission_id: str
+    message: str
+
+
+# ---------------------------------------------------------------------------
+# Evaluation API models
+# ---------------------------------------------------------------------------
+
 class EvaluateRequest(BaseModel):
-    """Body for POST /evaluations/evaluate."""
-    ocr_id: str
+    """Body for POST /submissions/{submission_id}/evaluation:generate."""
+    submission_id: str
 
 
 class EvaluationResponse(BaseModel):
     """Returned after evaluate and on GET detail."""
     eval_id: str
     paper_id: str
+    submission_id: str
     answer_sha256: str
     is_duplicate: bool
     student_info: StudentInfo
@@ -128,13 +148,13 @@ class EvaluationSummaryResponse(BaseModel):
     """Returned in the list view — one row per student."""
     eval_id: str
     paper_id: str
+    submission_id: str
     student_name: str
     roll_number: Optional[str]
     confirmed: bool
 
 
 class EvaluationConfirmRequest(BaseModel):
-    eval_id: str
     student_info: StudentInfo
     extracted_answers: List[ExtractedAnswer] = []
     evaluation_summary: EvaluationSummary
@@ -151,22 +171,11 @@ class EvaluationDeleteResponse(BaseModel):
     message: str
 
 
-class OcrDeleteResponse(BaseModel):
-    ocr_id: str
-    message: str
+# ---------------------------------------------------------------------------
+# Legacy aliases — so existing internal imports (OcrResponse etc.) keep working
+# ---------------------------------------------------------------------------
 
-
-class OcrStudentInfoUpdateRequest(BaseModel):
-    student_name: str
-    roll_number: Optional[str] = None
-
-
-class OcrSummaryResponse(BaseModel):
-    """Returned in the OCR list view — one row per uploaded answer sheet."""
-    ocr_id: str
-    paper_id: str
-    answer_sha256: str
-    student_name: str
-    roll_number: Optional[str]
-    has_evaluation: bool
-    created_at: str
+OcrResponse                 = SubmissionResponse
+OcrSummaryResponse          = SubmissionSummaryResponse
+OcrStudentInfoUpdateRequest = SubmissionStudentInfoUpdateRequest
+OcrDeleteResponse           = SubmissionDeleteResponse

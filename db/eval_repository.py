@@ -1,3 +1,4 @@
+import json
 import aiosqlite
 from typing import Optional
 
@@ -5,14 +6,15 @@ from models.schemas import (
     EvaluationReport,
     EvaluationResponse,
     EvaluationSummaryResponse,
+    SubmissionSummaryResponse,
     ExtractedAnswer,
     StudentInfo,
-    OcrSummaryResponse,
 )
 
 
 # ---------------------------------------------------------------------------
-# OCR Repository — ocr_results table
+# OcrRepository  (internal name; DB table stays "ocr_results")
+# submission_id == ocr_id at the DB level
 # ---------------------------------------------------------------------------
 
 class OcrRepository:
@@ -24,18 +26,14 @@ class OcrRepository:
             "SELECT * FROM ocr_results WHERE answer_sha256 = ?", (answer_sha256,)
         ) as cursor:
             row = await cursor.fetchone()
-            if not row:
-                return None
-            return dict(row)
+            return dict(row) if row else None
 
     async def find_by_id(self, ocr_id: str) -> Optional[dict]:
         async with self.db.execute(
             "SELECT * FROM ocr_results WHERE ocr_id = ?", (ocr_id,)
         ) as cursor:
             row = await cursor.fetchone()
-            if not row:
-                return None
-            return dict(row)
+            return dict(row) if row else None
 
     async def insert(
         self,
@@ -45,7 +43,6 @@ class OcrRepository:
         student_info: StudentInfo,
         extracted_answers: list[ExtractedAnswer],
     ) -> None:
-        import json
         await self.db.execute(
             """
             INSERT INTO ocr_results
@@ -77,8 +74,8 @@ class OcrRepository:
             await self.db.commit()
             return cursor.rowcount > 0
 
-    async def list_by_paper(self, paper_id: str) -> list[OcrSummaryResponse]:
-        """List all OCR results for a paper, flagging which ones already have an evaluation."""
+    async def list_by_paper(self, paper_id: str) -> list[SubmissionSummaryResponse]:
+        """List all submissions for a paper, flagging which have an evaluation."""
         async with self.db.execute(
             """
             SELECT
@@ -96,8 +93,8 @@ class OcrRepository:
             for row in rows:
                 info = StudentInfo.model_validate_json(row["student_info"])
                 results.append(
-                    OcrSummaryResponse(
-                        ocr_id=row["ocr_id"],
+                    SubmissionSummaryResponse(
+                        submission_id=row["ocr_id"],
                         paper_id=row["paper_id"],
                         answer_sha256=row["answer_sha256"],
                         student_name=info.student_name,
@@ -110,7 +107,7 @@ class OcrRepository:
 
 
 # ---------------------------------------------------------------------------
-# Evaluation Repository — evaluations table
+# EvaluationRepository
 # ---------------------------------------------------------------------------
 
 class EvaluationRepository:
@@ -122,23 +119,19 @@ class EvaluationRepository:
             "SELECT * FROM evaluations WHERE eval_id = ?", (eval_id,)
         ) as cursor:
             row = await cursor.fetchone()
-            if not row:
-                return None
-            return self._row_to_response(row)
+            return self._row_to_response(row) if row else None
 
     async def find_by_id_via_ocr(self, ocr_id: str) -> Optional[EvaluationResponse]:
         async with self.db.execute(
             "SELECT * FROM evaluations WHERE ocr_id = ?", (ocr_id,)
         ) as cursor:
             row = await cursor.fetchone()
-            if not row:
-                return None
-            return self._row_to_response(row, is_duplicate=True)
+            return self._row_to_response(row, is_duplicate=True) if row else None
 
     async def list_by_paper(self, paper_id: str) -> list[EvaluationSummaryResponse]:
         async with self.db.execute(
             """
-            SELECT eval_id, paper_id, student_info, evaluation, confirmed
+            SELECT eval_id, ocr_id, paper_id, student_info, evaluation, confirmed
             FROM evaluations
             WHERE paper_id = ?
             ORDER BY created_at DESC
@@ -153,6 +146,7 @@ class EvaluationRepository:
                     EvaluationSummaryResponse(
                         eval_id=row["eval_id"],
                         paper_id=row["paper_id"],
+                        submission_id=row["ocr_id"],
                         student_name=report.student_info.student_name,
                         roll_number=report.student_info.roll_number,
                         confirmed=bool(row["confirmed"]),
@@ -216,6 +210,7 @@ class EvaluationRepository:
         return EvaluationResponse(
             eval_id=row["eval_id"],
             paper_id=row["paper_id"],
+            submission_id=row["ocr_id"],
             answer_sha256=row["answer_sha256"],
             is_duplicate=is_duplicate,
             student_info=report.student_info,

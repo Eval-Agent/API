@@ -67,7 +67,7 @@ class PaperUploadResponse(BaseModel):
 
 
 class RubricGenerateRequest(BaseModel):
-    paper_id: str
+    """Body for POST /papers/{paper_id}/rubric:generate — paper_id is in the URL path."""
     strictness: Strictness = Strictness.medium
 
 
@@ -80,10 +80,9 @@ class RubricGenerateResponse(BaseModel):
 
 class PaperConfirmRequest(BaseModel):
     """
-    Sent by the client after the user reviews and optionally edits
-    the parsed paper and rubric before final persistence.
+    Body for POST /papers/{paper_id}:confirm — paper_id is in the URL path.
+    Send the final (possibly edited) parsed_paper and rubric.
     """
-    paper_id: str
     parsed_paper: ParsedPaper
     rubric: Rubric
 
