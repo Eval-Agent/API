@@ -10,7 +10,9 @@ Question text
 
 Total marks assigned to the question
 
-You must:
+==================================================
+YOU MUST
+==================================================
 
 Read the question carefully.
 
@@ -20,7 +22,7 @@ Align depth and number of concepts with the total marks.
 
 Distribute marks logically across concepts.
 
-Ensure the total of concept marks equals the question’s total marks.
+Ensure the total of concept marks equals the question's total marks.
 
 Define keyword indicators for each concept.
 
@@ -28,13 +30,11 @@ Define partial marking logic.
 
 Avoid adding unnecessary concepts not required by the question.
 
-Adjust expectation depth based on marks:
+Assign the correct expected_depth using Bloom's Taxonomy (see below).
 
-1–2 marks → Definition or keyword-based
-
-3–5 marks → Explanation + example
-
-6–10 marks → Detailed explanation + reasoning + diagram/example
+==================================================
+OUTPUT RULES
+==================================================
 
 Output must strictly follow the provided JSON schema.
 Do not include explanations.
@@ -42,3 +42,70 @@ Do not include markdown.
 Return valid JSON only.
 
 If the question is ambiguous, make a reasonable academic assumption.
+
+==================================================
+EXPECTED DEPTH — BLOOM'S TAXONOMY
+==================================================
+
+Assign exactly one of the following values to expected_depth for each question.
+Choose the level that matches what the question is actually asking the student to DO — not just the surface wording.
+
+--------------------------------------------------
+"remember"
+--------------------------------------------------
+The answer requires recalling facts, definitions, terms, or lists from memory.
+No explanation or reasoning is expected — accurate recall is sufficient.
+
+Typical question words: Define, List, Name, State, Identify, Recall, What is.
+
+Mark allocation guidance: typically 1–2 marks.
+
+--------------------------------------------------
+"understand"
+--------------------------------------------------
+The answer requires explaining, summarising, or describing a concept in the student's own words.
+The student must show comprehension — not just recite a memorised phrase.
+
+Typical question words: Explain, Describe, Summarise, Interpret, Classify, Discuss, Why.
+
+Mark allocation guidance: typically 2–4 marks.
+
+--------------------------------------------------
+"apply"
+--------------------------------------------------
+The answer requires using knowledge or a procedure to solve a problem, work through an example, or demonstrate a technique.
+A worked example or concrete demonstration is expected — not just a description.
+
+Typical question words: Solve, Calculate, Use, Demonstrate, Apply, Implement, Show how.
+
+Mark allocation guidance: typically 3–5 marks.
+
+--------------------------------------------------
+"analyze"
+--------------------------------------------------
+The answer requires breaking down a concept, comparing components, examining relationships, or differentiating between approaches.
+A structured breakdown with specific criteria or dimensions is expected.
+
+Typical question words: Compare, Contrast, Differentiate, Examine, Break down, Analyse, How does X relate to Y.
+
+Mark allocation guidance: typically 4–7 marks.
+
+--------------------------------------------------
+"evaluate"
+--------------------------------------------------
+The answer requires making a justified judgement, critiquing an approach, assessing trade-offs, or arguing a position.
+The student must take a clear stance and support it with reasoning — listing pros/cons alone is insufficient.
+
+Typical question words: Justify, Evaluate, Assess, Critique, Argue, Defend, Is X better than Y and why.
+
+Mark allocation guidance: typically 5–8 marks.
+
+--------------------------------------------------
+"create"
+--------------------------------------------------
+The answer requires designing, constructing, proposing, or synthesising something new.
+Describing an existing solution is not sufficient — original construction or adaptation is expected.
+
+Typical question words: Design, Construct, Propose, Formulate, Synthesise, Develop, Create.
+
+Mark allocation guidance: typically 7–10 marks.

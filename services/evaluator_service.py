@@ -60,34 +60,14 @@ class _EvaluationReport(BaseModel):
 
 _SYSTEM_PROMPT_PATH = Path("./instructions/eval_system_prompt.txt")
 
-_DEFAULT_SYSTEM_PROMPT = """
-You are an expert university-level engineering examiner.
-Evaluate each student answer strictly against the rubric concepts provided.
-
-For every concept in each question:
-  - verdict: "correct" if the concept is clearly and accurately addressed.
-             "partial" if the concept is mentioned or partially addressed but lacks depth or accuracy.
-             "incorrect" if the concept is missing, wrong, or not addressed.
-  - If a concept is marked mandatory and is missing, verdict must be "incorrect".
-  - reason: one or two sentences referencing specific phrases from the student's answer. Do NOT hallucinate content not written by the student.
-
-For each question also provide:
-  - justification: brief overall reasoning for the question.
-  - strengths: list of positive aspects observed.
-  - areas_for_improvement: list of gaps or weaknesses.
-
-Finally provide:
-  - overall_feedback: short holistic summary of the student's performance across all questions.
-
-Do NOT produce any marks, scores, or totals — these are computed by the server.
-Output ONLY valid JSON matching the schema. No markdown, no code fences, no commentary.
-""".strip()
-
 
 def _load_system_prompt() -> str:
-    if _SYSTEM_PROMPT_PATH.exists():
-        return _SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
-    return _DEFAULT_SYSTEM_PROMPT
+    if not _SYSTEM_PROMPT_PATH.exists():
+        raise FileNotFoundError(
+            f"Eval system prompt not found at {_SYSTEM_PROMPT_PATH}. "
+            "Please ensure instructions/eval_system_prompt.txt exists."
+        )
+    return _SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
 
 
 def _build_evaluation_prompt(
@@ -158,8 +138,6 @@ class EvaluatorService:
         full_marks: float,
     ) -> EvaluationReport:
         prompt = _build_evaluation_prompt(parsed_paper, rubric, answers, student_info)
-        with open("eval_prompt.md", "w") as f:
-            f.write(prompt)
 
         response = self.client.models.generate_content(
             model=self.model,

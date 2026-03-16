@@ -22,10 +22,12 @@ from models.schemas import (
 # ---------------------------------------------------------------------------
 
 class _ExpectedDepth(str, Enum):
-    definition = "definition"
-    short_explanation = "short_explanation"
-    detailed_explanation = "detailed_explanation"
-    analytical = "analytical"
+    remember   = "remember"
+    understand = "understand"
+    apply      = "apply"
+    analyze    = "analyze"
+    evaluate   = "evaluate"
+    create     = "create"
 
 
 class _Concept(BaseModel):
@@ -58,45 +60,42 @@ class _RubricSchema(BaseModel):
 
 _SYSTEM_PROMPT_PATH = Path("./instructions/rubric_system_prompt.txt")
 
-_DEFAULT_SYSTEM_PROMPT = """
-You are an expert academic examiner.
-Given a parsed question paper in JSON format, generate a detailed marking rubric for each question.
-For every question, identify key concepts, mandatory keywords, expected answer depth, marks per concept, and partial marking rules.
-Return structured JSON matching the schema provided.
-""".strip()
+
+def _load_system_prompt() -> str:
+    if not _SYSTEM_PROMPT_PATH.exists():
+        raise FileNotFoundError(
+            f"Rubric system prompt not found at {_SYSTEM_PROMPT_PATH}. "
+            "Please ensure instructions/rubric_system_prompt.txt exists."
+        )
+    return _SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
+
 
 _STRICTNESS_INSTRUCTIONS = {
     Strictness.easy: (
         "STRICTNESS: EASY — Be lenient. Award marks generously. "
         "Partial credit should be given for any reasonable attempt. "
-        "Set keyword_only_percentage to 0.75 and partial_explanation_percentage to 1.00. "
+        "Set keyword_only_percentage to 75 and partial_explanation_percentage to 90. "
         "Mark few concepts as mandatory. Accept informal or incomplete explanations."
     ),
     Strictness.medium: (
         "STRICTNESS: MEDIUM — Apply balanced marking. "
         "Award full marks for complete correct answers, partial marks for partially correct ones. "
-        "Set keyword_only_percentage to 0.50 and partial_explanation_percentage to 0.75. "
+        "Set keyword_only_percentage to 50 and partial_explanation_percentage to 75. "
         "Core concepts should be mandatory, supporting ones optional."
     ),
     Strictness.hard: (
         "STRICTNESS: HARD — Apply strict marking. "
         "Require precise terminology and thorough explanations for full marks. "
-        "Set keyword_only_percentage to 0.30 and partial_explanation_percentage to 0.60. "
+        "Set keyword_only_percentage to 30 and partial_explanation_percentage to 60. "
         "Most concepts should be mandatory. Vague or imprecise answers should score low."
     ),
     Strictness.extreme: (
         "STRICTNESS: EXTREME — Apply the most rigorous marking possible. "
         "Only award full marks for technically precise, complete, and well-structured answers. "
-        "Set keyword_only_percentage to 0.10 and partial_explanation_percentage to 0.40. "
+        "Set keyword_only_percentage to 10 and partial_explanation_percentage to 40. "
         "All key concepts must be mandatory. Any missing detail should result in significant deduction."
     ),
 }
-
-
-def _load_system_prompt() -> str:
-    if _SYSTEM_PROMPT_PATH.exists():
-        return _SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
-    return _DEFAULT_SYSTEM_PROMPT
 
 
 class RubricService:

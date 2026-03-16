@@ -11,14 +11,15 @@ EVALUATION RULES
 4. Do NOT assume knowledge not stated by the student.
 5. If a concept is marked Mandatory and is missing from the answer, verdict must be "incorrect".
 6. Be strict and objective.
+7. Use the expected_depth field from the rubric to calibrate how deeply the student's answer must go before awarding "correct" (see BLOOM'S TAXONOMY section below).
 
 ==================================================
 VERDICT RULES
 ==================================================
 
 For every concept in each question assign one of:
-  - "correct"   : the concept is clearly and accurately addressed.
-  - "partial"   : the concept is mentioned or partially addressed but lacks depth or accuracy.
+  - "correct"   : the concept is clearly and accurately addressed at the expected depth.
+  - "partial"   : the concept is mentioned or partially addressed but lacks the required depth or accuracy.
   - "incorrect" : the concept is missing, wrong, or not addressed.
 
 ==================================================
@@ -64,3 +65,65 @@ REQUIRED OUTPUT FIELDS
     - justification                   : Overall justification for the question.
     - strengths                       : List of positive aspects.
     - areas_for_improvement           : List of gaps or weaknesses.
+
+==================================================
+EXPECTED DEPTH — BLOOM'S TAXONOMY
+==================================================
+
+Each question in the rubric carries an expected_depth field.
+Use it to decide how deeply the student's answer must go before awarding "correct".
+
+--------------------------------------------------
+"remember"
+--------------------------------------------------
+Expect only accurate recall of facts, definitions, or lists.
+
+Award "correct"   : answer is brief but factually accurate.
+Award "partial"   : answer is mostly correct but contains a minor factual error or omission.
+Award "incorrect" : facts are wrong, confused, or entirely missing.
+
+--------------------------------------------------
+"understand"
+--------------------------------------------------
+Expect the student to explain or describe in their own words — not just recite a memorised phrase.
+
+Award "correct"   : clear, accurate explanation that demonstrates genuine comprehension.
+Award "partial"   : student restates a definition verbatim without showing understanding,
+                    or explains only part of the concept.
+Award "incorrect" : student copies keywords with no explanation, or the explanation is wrong.
+
+--------------------------------------------------
+"apply"
+--------------------------------------------------
+Expect a worked example, calculation, or concrete demonstration — description alone is not enough.
+
+Award "correct"   : a valid, correct example or application is shown.
+Award "partial"   : student names the concept and gestures at an example but does not work it through.
+Award "incorrect" : no example or application is attempted.
+
+--------------------------------------------------
+"analyze"
+--------------------------------------------------
+Expect a structured comparison, breakdown, or examination using specific criteria or dimensions.
+
+Award "correct"   : systematic breakdown with named dimensions (e.g. time complexity, memory, use-case).
+Award "partial"   : student describes each item separately without drawing comparisons or relationships.
+Award "incorrect" : student lists facts with no analytical structure.
+
+--------------------------------------------------
+"evaluate"
+--------------------------------------------------
+Expect a justified judgement or critique — the student must take a position and defend it with reasoning.
+
+Award "correct"   : clear stance stated and supported with specific reasoning or evidence.
+Award "partial"   : student lists pros/cons or trade-offs but does not reach or justify a conclusion.
+Award "incorrect" : no judgement is made, or reasoning directly contradicts the rubric concepts.
+
+--------------------------------------------------
+"create"
+--------------------------------------------------
+Expect original design, construction, or synthesis — describing an existing solution is not sufficient.
+
+Award "correct"   : student proposes or constructs something with clear original thought.
+Award "partial"   : student adapts an existing solution with minor modifications.
+Award "incorrect" : student only describes a known solution with no creative contribution.

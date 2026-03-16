@@ -8,10 +8,13 @@ from enum import Enum
 # ---------------------------------------------------------------------------
 
 class ExpectedDepth(str, Enum):
-    definition          = "definition"
-    short_explanation   = "short_explanation"
-    detailed_explanation = "detailed_explanation"
-    analytical          = "analytical"
+    """Bloom's Taxonomy cognitive levels — used to set the expected answer depth per question."""
+    remember   = "remember"    # Recall facts, definitions, or lists
+    understand = "understand"  # Explain, summarise, or describe in own words
+    apply      = "apply"       # Use knowledge to solve a problem or demonstrate
+    analyze    = "analyze"     # Break down, compare, differentiate, or examine
+    evaluate   = "evaluate"    # Justify, critique, assess, or argue a position
+    create     = "create"      # Design, construct, propose, or synthesise something new"
 
 
 class Concept(BaseModel):
