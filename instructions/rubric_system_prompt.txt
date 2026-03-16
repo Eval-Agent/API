@@ -32,6 +32,10 @@ Avoid adding unnecessary concepts not required by the question.
 
 Assign the correct expected_depth using Bloom's Taxonomy (see below).
 
+If a question already contains a "bloom_level" field with a non-null value,
+that value is the officially printed Bloom's level from the question paper.
+Set expected_depth to match it. Only infer from the question text when bloom_level is null.
+
 ==================================================
 OUTPUT RULES
 ==================================================

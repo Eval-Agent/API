@@ -3,7 +3,7 @@ from pathlib import Path
 from google import genai
 from google.genai import types
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 from enum import Enum
 
 from models.schemas import (
@@ -98,6 +98,70 @@ _STRICTNESS_INSTRUCTIONS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Bloom's level normaliser
+# Maps any printed form from the question paper to a canonical ExpectedDepth.
+# Returns None if the value cannot be mapped — Gemini's choice is used instead.
+# ---------------------------------------------------------------------------
+
+# Abbreviated level maps: L1-L6 and BTL1-BTL6 follow Bloom's order
+_LEVEL_NUM_MAP: dict = {
+    "1": "remember",
+    "2": "understand",
+    "3": "apply",
+    "4": "analyze",
+    "5": "evaluate",
+    "6": "create",
+}
+
+# Full / common variant spellings → canonical value
+_BLOOM_TEXT_MAP: dict = {
+    "remember":    "remember",
+    "recall":      "remember",
+    "knowledge":   "remember",
+    "understand":  "understand",
+    "understanding": "understand",
+    "comprehension": "understand",
+    "describe":    "understand",
+    "apply":       "apply",
+    "application": "apply",
+    "analyse":     "analyze",
+    "analyze":     "analyze",
+    "analysis":    "analyze",
+    "evaluate":    "evaluate",
+    "evaluation":  "evaluate",
+    "create":      "create",
+    "synthesis":   "create",
+    "design":      "create",
+}
+
+
+def _normalize_bloom_level(raw: Optional[str]) -> Optional[str]:
+    """
+    Convert any printed Bloom's level string to a canonical ExpectedDepth value.
+
+    Handles:
+      Full words  : "Remember", "Analyse", "Understand"
+      L-notation  : "L1", "L3", "l6"
+      BTL-notation: "BTL1", "BTL4", "btl2"
+      Returns None if unrecognised — Gemini's output is used as fallback.
+    """
+    if not raw:
+        return None
+    v = raw.strip().lower()
+
+    # L1–L6
+    if v.startswith("l") and v[1:] in _LEVEL_NUM_MAP:
+        return _LEVEL_NUM_MAP[v[1:]]
+
+    # BTL1–BTL6
+    if v.startswith("btl") and v[3:] in _LEVEL_NUM_MAP:
+        return _LEVEL_NUM_MAP[v[3:]]
+
+    # Full word / variant
+    return _BLOOM_TEXT_MAP.get(v, None)
+
+
 class RubricService:
     def __init__(self):
         api_key = os.getenv("GEMINI_API_KEY") or os.getenv("api_key")
@@ -117,6 +181,14 @@ class RubricService:
     ) -> Rubric:
         system_prompt = self._build_prompt(strictness)
 
+        # Build a lookup of question_id → canonical depth from bloom_level printed
+        # on the question paper. Gemini's output is overridden where this is present.
+        bloom_override: dict = {}
+        for pq in parsed_paper.questions:
+            canonical = _normalize_bloom_level(getattr(pq, "bloom_level", None))
+            if canonical:
+                bloom_override[pq.question_id] = canonical
+
         response = self.client.models.generate_content(
             model=self.model,
             config=types.GenerateContentConfig(
@@ -135,7 +207,10 @@ class RubricService:
                     question_id=q.question_id,
                     question_text=q.question_text,
                     total_marks=q.total_marks,
-                    expected_depth=ExpectedDepth(q.expected_depth.value),
+                    # Use printed bloom_level if available, otherwise trust Gemini
+                    expected_depth=ExpectedDepth(
+                        bloom_override.get(q.question_id, q.expected_depth.value)
+                    ),
                     concepts=[Concept(**c.model_dump()) for c in q.concepts],
                     partial_marking_rule=PartialMarkingRule(
                         **q.partial_marking_rule.model_dump()
