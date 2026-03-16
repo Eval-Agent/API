@@ -3,7 +3,7 @@ from pathlib import Path
 from google import genai
 from google.genai import types
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 
 from models.schemas import ParsedPaper, PaperMetadata, ParsedQuestion
 
@@ -28,6 +28,8 @@ class _Question(BaseModel):
     question_id: int
     question_markdown: str
     max_score: int
+    course_outcome: Optional[str] = None
+    bloom_level: Optional[str] = None
 
 
 class _QuizSchema(BaseModel):
@@ -54,13 +56,11 @@ def _load_system_prompt() -> str:
 
 class OCRService:
     def __init__(self):
-        api_key = os.getenv("api_key")
-        
+        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("api_key")
         if not api_key:
             raise EnvironmentError("GEMINI_API_KEY environment variable not set.")
         self.client = genai.Client(api_key=api_key)
-        self.model = os.getenv("OCR_MODEL")
-        print(self.model)
+        self.model = os.getenv("OCR_MODEL", "gemini-2.0-flash-lite")
         self.system_prompt = _load_system_prompt()
 
     async def extract_questions(self, pdf_bytes: bytes) -> ParsedPaper:
@@ -85,6 +85,13 @@ class OCRService:
         return ParsedPaper(
             metadata=PaperMetadata(**parsed.metadata.model_dump()),
             questions=[
-                ParsedQuestion(**q.model_dump()) for q in parsed.questions
+                ParsedQuestion(
+                    question_id=q.question_id,
+                    question_markdown=q.question_markdown,
+                    max_score=q.max_score,
+                    course_outcome=q.course_outcome or None,
+                    bloom_level=q.bloom_level or None,
+                )
+                for q in parsed.questions
             ],
         )

@@ -36,6 +36,8 @@ class ParsedQuestion(BaseModel):
     question_id: int
     question_markdown: str
     max_score: int
+    course_outcome: Optional[str] = None   # e.g. "CO1", "CO2" — extracted from paper if printed
+    bloom_level: Optional[str] = None      # e.g. "Remember", "Analyze" — extracted from paper if printed
 
 
 class ParsedPaper(BaseModel):

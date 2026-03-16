@@ -74,6 +74,7 @@ The JSON must contain exactly two root keys:
 
 metadata
 questions
+
 Metadata Object
 
 The metadata object must contain ONLY the following fields:
@@ -111,6 +112,7 @@ Example:
   "total_duration": "",
   "total_pages": ""
 }
+
 Question Objects
 
 Each object inside "questions" must contain ONLY:
@@ -118,6 +120,12 @@ Each object inside "questions" must contain ONLY:
 "question_id"
 
 "question_markdown"
+
+"max_score"
+
+"course_outcome"
+
+"bloom_level"
 
 Do NOT include:
 
@@ -135,6 +143,59 @@ extra keys of any kind
 
 Do NOT rename fields.
 Do NOT change key casing.
+
+==================================================
+COURSE OUTCOME AND BLOOM'S TAXONOMY EXTRACTION
+
+Many question papers print a Course Outcome (CO) and/or a Bloom's Taxonomy level alongside each question, typically in a table column, bracket, or inline tag.
+
+--------------------------------------------------
+course_outcome
+--------------------------------------------------
+Extract the Course Outcome label exactly as printed.
+
+Common formats: CO1, CO2, CO3, C01, C-1, CO 2
+
+Rules:
+
+Extract the value exactly as printed (e.g. "CO1", "CO2").
+
+If multiple COs are listed for one question, extract all of them as a single string exactly as printed (e.g. "CO1, CO2").
+
+If no Course Outcome is visible for this question, return null.
+
+Do NOT infer or guess a CO that is not explicitly printed next to the question.
+
+--------------------------------------------------
+bloom_level
+--------------------------------------------------
+Extract the Bloom's Taxonomy level exactly as printed.
+
+Common printed values: Remember, Understand, Apply, Analyse, Analyze, Evaluate, Create
+
+Common abbreviated forms: L1, L2, L3, L4, L5, L6, BTL1, BTL2, BTL3
+
+Rules:
+
+Extract the value exactly as printed (e.g. "Remember", "L3", "BTL2").
+
+Do NOT normalise or change the casing — preserve exactly what is printed.
+
+If no Bloom's level is visible for this question, return null.
+
+Do NOT infer a level from the question text — only extract what is explicitly printed.
+
+--------------------------------------------------
+Example question objects:
+
+Visible on paper: "1. Define AI. [2M] [CO1] [Remember]"
+→ { "question_id": 1, "question_markdown": "Define AI.", "max_score": 2, "course_outcome": "CO1", "bloom_level": "Remember" }
+
+Visible on paper: "2. Compare BFS and DFS. [5M]"
+→ { "question_id": 2, "question_markdown": "Compare BFS and DFS.", "max_score": 5, "course_outcome": null, "bloom_level": null }
+
+Visible on paper: "3. Design a neural network. [10M] [CO3, CO4] [L6]"
+→ { "question_id": 3, "question_markdown": "Design a neural network.", "max_score": 10, "course_outcome": "CO3, CO4", "bloom_level": "L6" }
 
 ==================================================
 STRICT MARKDOWN ENFORCEMENT (VERY IMPORTANT)
