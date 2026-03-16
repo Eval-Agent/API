@@ -16,6 +16,7 @@ from models.evaluation import (
     ConceptVerdict,
     StudentInfo,
     build_evaluation_summary,
+    _bloom_outcome,
 )
 
 
@@ -196,15 +197,19 @@ class EvaluatorService:
                 for c in qe.concept_evaluations
             ]
 
+            q_marks_awarded = sum(c.marks_awarded for c in concept_evals)
+            bloom_depth = rubric_q.expected_depth.value if rubric_q else None
             question_wise.append(
                 QuestionEvaluation(
                     question_id=qe.question_id,
                     maximum_marks=qe.maximum_marks,
                     concept_evaluations=concept_evals,
-                    marks_awarded=sum(c.marks_awarded for c in concept_evals),
+                    marks_awarded=q_marks_awarded,
                     justification=qe.justification,
                     strengths=qe.strengths,
                     areas_for_improvement=qe.areas_for_improvement,
+                    bloom_depth=bloom_depth,
+                    bloom_outcome=_bloom_outcome(q_marks_awarded, qe.maximum_marks),
                 )
             )
 

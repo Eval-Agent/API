@@ -31,6 +31,9 @@ from models.paper import (
 )
 
 from models.evaluation import (
+    BloomOutcome,
+    BloomDepthStat,
+    _bloom_outcome,
     StudentInfo,
     EvaluationSummary,
     ConceptVerdict,
@@ -69,6 +72,7 @@ __all__ = [
     "PaperConfirmRequest", "PaperConfirmResponse",
     "PaperSummary", "PaperDetailResponse", "PaperDeleteResponse",
     # evaluation core
+    "BloomOutcome", "BloomDepthStat", "_bloom_outcome",
     "StudentInfo", "EvaluationSummary", "ConceptVerdict", "ConceptEvaluation",
     "QuestionEvaluation", "ExtractedAnswer", "EvaluationReport",
     "build_evaluation_summary",
