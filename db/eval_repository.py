@@ -35,6 +35,42 @@ class OcrRepository:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
+
+    async def list_full_by_paper(
+        self,
+        paper_id: str,
+        confirmed_only: bool = True,
+    ) -> list:
+        """
+        Return every evaluation for a paper as a list of dicts containing
+        the full EvaluationReport alongside DB metadata.
+        Used exclusively by the CSV export endpoint.
+        """
+        query = """
+            SELECT eval_id, ocr_id, paper_id, evaluation, confirmed, created_at
+            FROM evaluations
+            WHERE paper_id = ?
+        """
+        params = [paper_id]
+        if confirmed_only:
+            query += " AND confirmed = 1"
+        query += " ORDER BY created_at ASC"
+
+        async with self.db.execute(query, params) as cursor:
+            rows = await cursor.fetchall()
+            results = []
+            for row in rows:
+                report = EvaluationReport.model_validate_json(row["evaluation"])
+                results.append({
+                    "eval_id":   row["eval_id"],
+                    "ocr_id":    row["ocr_id"],
+                    "paper_id":  row["paper_id"],
+                    "confirmed": bool(row["confirmed"]),
+                    "created_at": row["created_at"],
+                    "report":    report,
+                })
+            return results
+
     async def insert(
         self,
         ocr_id: str,
@@ -153,6 +189,40 @@ class EvaluationRepository:
                     )
                 )
             return summaries
+
+    async def list_full_by_paper(
+        self,
+        paper_id: str,
+        confirmed_only: bool = True,
+    ) -> list:
+        """
+        Return every evaluation for a paper as a list of dicts containing
+        the full EvaluationReport alongside DB metadata.
+        Used exclusively by the CSV export endpoint.
+        """
+        query = """
+            SELECT eval_id, ocr_id, paper_id, evaluation, confirmed, created_at
+            FROM evaluations
+            WHERE paper_id = ?
+        """
+        if confirmed_only:
+            query += " AND confirmed = 1"
+        query += " ORDER BY created_at ASC"
+
+        async with self.db.execute(query, (paper_id,)) as cursor:
+            rows = await cursor.fetchall()
+            results = []
+            for row in rows:
+                report = EvaluationReport.model_validate_json(row["evaluation"])
+                results.append({
+                    "eval_id":    row["eval_id"],
+                    "ocr_id":     row["ocr_id"],
+                    "paper_id":   row["paper_id"],
+                    "confirmed":  bool(row["confirmed"]),
+                    "created_at": row["created_at"],
+                    "report":     report,
+                })
+            return results
 
     async def insert(
         self,
