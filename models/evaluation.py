@@ -68,9 +68,10 @@ class QuestionEvaluation(BaseModel):
     justification: str
     strengths: Optional[List[str]] = None
     areas_for_improvement: Optional[List[str]] = None
-    # Bloom's fields — populated by the evaluator service, never by Gemini
-    bloom_depth: Optional[str] = None    # e.g. "analyze"  — from rubric
+    # Populated by the evaluator service from parsed_paper — never by Gemini
+    bloom_depth: Optional[str] = None    # e.g. "analyze"  — from rubric expected_depth
     bloom_outcome: Optional[str] = None  # "correct" | "partial" | "incorrect"
+    course_outcome: Optional[str] = None # e.g. "CO1", "CO1, CO2" — from parsed question
 
 
 class ExtractedAnswer(BaseModel):

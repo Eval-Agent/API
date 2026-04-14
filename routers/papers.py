@@ -335,10 +335,11 @@ async def export_evaluations_csv(
         header.append(f"bloom_{level}_total")
         header.append(f"bloom_{level}_pct")
 
-    # Per-question columns: marks_awarded, max_marks, bloom_depth, bloom_outcome
+    # Per-question columns: marks_awarded, max_marks, course_outcome, bloom_depth, bloom_outcome
     for qid in all_question_ids:
         header.append(f"q{qid}_marks_awarded")
         header.append(f"q{qid}_max_marks")
+        header.append(f"q{qid}_course_outcome")
         header.append(f"q{qid}_bloom_depth")
         header.append(f"q{qid}_bloom_outcome")
 
@@ -380,10 +381,11 @@ async def export_evaluations_csv(
             if qe:
                 data.append(qe.marks_awarded)
                 data.append(qe.maximum_marks)
+                data.append(qe.course_outcome or "")
                 data.append(qe.bloom_depth or "")
                 data.append(qe.bloom_outcome or "")
             else:
-                data.extend(["", "", "", ""])
+                data.extend(["", "", "", "", ""])
 
         writer.writerow(data)
 

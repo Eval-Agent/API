@@ -158,6 +158,12 @@ class EvaluatorService:
         # Build rubric lookups for deterministic mark computation
         rubric_q_lookup = {rq.question_id: rq for rq in rubric.questions}
 
+        # Build course_outcome lookup from parsed paper questions
+        co_lookup = {
+            pq.question_id: getattr(pq, "course_outcome", None)
+            for pq in parsed_paper.questions
+        }
+
         def _concept_marks(
             verdict: _ConceptVerdict,
             marks_allocated: float,
@@ -210,6 +216,7 @@ class EvaluatorService:
                     areas_for_improvement=qe.areas_for_improvement,
                     bloom_depth=bloom_depth,
                     bloom_outcome=_bloom_outcome(q_marks_awarded, qe.maximum_marks),
+                    course_outcome=co_lookup.get(qe.question_id),
                 )
             )
 
