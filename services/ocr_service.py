@@ -5,7 +5,7 @@ from google.genai import types
 from pydantic import BaseModel
 from typing import List, Optional
 
-from models.schemas import ParsedPaper, PaperMetadata, ParsedQuestion
+from models.schemas import ParsedPaper, PaperMetadata, ParsedQuestion, PaperSection
 
 
 # ---------------------------------------------------------------------------
@@ -30,11 +30,26 @@ class _Question(BaseModel):
     max_score: int
     course_outcome: Optional[str] = None
     bloom_level: Optional[str] = None
+    section_name: Optional[str] = None   # e.g. "Part A", "Part B", "Part C"
+
+
+class _Section(BaseModel):
+    """
+    One answerable section of the paper.
+    required_count  = N  in "Answer any N out of M questions"
+    marks_per_question = marks each question in this section carries
+    question_ids    = list of question_ids belonging to this section
+    """
+    section_name:       str
+    required_count:     int
+    marks_per_question: float
+    question_ids:       List[int]
 
 
 class _QuizSchema(BaseModel):
-    metadata: _Metadata
+    metadata:  _Metadata
     questions: List[_Question]
+    sections:  List[_Section] = []
 
 
 # ---------------------------------------------------------------------------
@@ -82,16 +97,30 @@ class OCRService:
 
         parsed = _QuizSchema.model_validate_json(response.text)
 
+        questions = [
+            ParsedQuestion(
+                question_id=q.question_id,
+                question_markdown=q.question_markdown,
+                max_score=q.max_score,
+                course_outcome=q.course_outcome or None,
+                bloom_level=q.bloom_level or None,
+                section_name=q.section_name or None,
+            )
+            for q in parsed.questions
+        ]
+
+        sections = [
+            PaperSection(
+                section_name=s.section_name,
+                required_count=s.required_count,
+                marks_per_question=s.marks_per_question,
+                question_ids=s.question_ids,
+            )
+            for s in parsed.sections
+        ]
+
         return ParsedPaper(
             metadata=PaperMetadata(**parsed.metadata.model_dump()),
-            questions=[
-                ParsedQuestion(
-                    question_id=q.question_id,
-                    question_markdown=q.question_markdown,
-                    max_score=q.max_score,
-                    course_outcome=q.course_outcome or None,
-                    bloom_level=q.bloom_level or None,
-                )
-                for q in parsed.questions
-            ],
+            questions=questions,
+            sections=sections,
         )

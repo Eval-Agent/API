@@ -298,54 +298,79 @@ async def export_evaluations_csv(
             ),
         )
 
-    # ── Collect all question IDs that appear across all evaluations ───────────
-    # Sort so columns are always in question order.
-    all_question_ids: list[int] = sorted({
-        qe.question_id
-        for row in rows
-        for qe in row["report"].question_wise_evaluation
-    })
+    # ── Bloom level → BT number mapping ─────────────────────────────────────
+    _BLOOM_TO_BT = {
+        "remember":   "BT1",
+        "understand": "BT2",
+        "apply":      "BT3",
+        "analyze":    "BT4",
+        "analyse":    "BT4",
+        "evaluate":   "BT5",
+        "create":     "BT6",
+    }
+
+    # Build question metadata lookup from the paper (ordered by question_id)
+    paper_q_lookup = {
+        pq.question_id: pq
+        for pq in paper.parsed_paper.questions
+    }
+
+    # ── Collect all question IDs in paper order ────────────────────────────────
+    all_question_ids: list[int] = sorted(paper_q_lookup.keys())
+
+    # Pull paper-level metadata for the fixed columns
+    meta = paper.parsed_paper.metadata
+    dept   = meta.stream or ""          # e.g. "CSE/CSE(DS)"
+    degree = meta.degree or ""          # e.g. "B.Tech"
+    subject_class = meta.subject_name or ""   # e.g. "Artificial Intelligence & Machine Learning"
 
     # ── Build CSV ─────────────────────────────────────────────────────────────
     output = io.StringIO()
     writer = csv.writer(output)
 
-    # Header row
-    # Fixed summary columns
+    # ── Row 1: Column headers ─────────────────────────────────────────────────
+    # Fixed student-info columns + one column per question
     header = [
-        "eval_id",
-        "student_name",
-        "roll_number",
-        "confirmed",
-        "full_marks",
-        "total_attempted",
-        "total_marks_awarded",
-        "percentage",
-        "overall_feedback",
+        "dept",
+        "year",
+        "enrollment no.",
+        "Name",
+        "Class",
+        "roll no",
     ]
-
-    # Bloom breakdown columns — one per level present in any evaluation
-    bloom_levels_present: list[str] = sorted({
-        level
-        for row in rows
-        for level in row["report"].evaluation_summary.bloom_breakdown.keys()
-    })
-    for level in bloom_levels_present:
-        header.append(f"bloom_{level}_awarded")
-        header.append(f"bloom_{level}_total")
-        header.append(f"bloom_{level}_pct")
-
-    # Per-question columns: marks_awarded, max_marks, course_outcome, bloom_depth, bloom_outcome
     for qid in all_question_ids:
-        header.append(f"q{qid}_marks_awarded")
-        header.append(f"q{qid}_max_marks")
-        header.append(f"q{qid}_course_outcome")
-        header.append(f"q{qid}_bloom_depth")
-        header.append(f"q{qid}_bloom_outcome")
+        header.append(f"q{qid}")
+
+    # Extra summary columns after questions
+    header += ["total_marks_awarded", "full_marks", "percentage", "confirmed", "overall_feedback"]
 
     writer.writerow(header)
 
-    # Data rows — one per student evaluation
+    # ── Row 2: Bloom's Taxonomy labels (fixed per paper, same for every student)
+    # Fixed columns get blank cells; question columns get BTx label
+    bloom_row = ["", "", "", "", "", ""]   # blanks for the 6 student-info columns
+    for qid in all_question_ids:
+        pq = paper_q_lookup.get(qid)
+        if pq and pq.bloom_level:
+            # bloom_level may be already normalised ("remember") or raw ("Remember", "L3", "BTL3")
+            bl = pq.bloom_level.strip().lower()
+            bt = _BLOOM_TO_BT.get(bl, "")
+            if not bt:
+                # Handle L1-L6 / BTL1-BTL6 notation
+                if bl.startswith("btl") and bl[3:].isdigit():
+                    bt = f"BT{bl[3:]}"
+                elif bl.startswith("l") and bl[1:].isdigit():
+                    bt = f"BT{bl[1:]}"
+                else:
+                    bt = pq.bloom_level  # keep as-is if unrecognised
+        else:
+            bt = ""
+        bloom_row.append(bt)
+
+    bloom_row += ["", "", "", "", ""]   # blanks for summary columns
+    writer.writerow(bloom_row)
+
+    # ── Row 3+: One student per row ───────────────────────────────────────────
     for row in rows:
         report  = row["report"]
         summary = report.evaluation_summary
@@ -354,38 +379,34 @@ async def export_evaluations_csv(
         qe_lookup = {qe.question_id: qe for qe in report.question_wise_evaluation}
 
         data = [
-            row["eval_id"],
+            dept,
+            degree,
+            report.student_info.roll_number or "",   # enrollment no. (best proxy)
             report.student_info.student_name,
+            subject_class,
             report.student_info.roll_number or "",
-            "yes" if row["confirmed"] else "no",
-            summary.full_marks,
-            summary.total_attempted,
-            summary.total_marks_awarded,
-            summary.percentage,
-            summary.overall_feedback.replace("\n", " "),
         ]
 
-        # Bloom breakdown columns
-        for level in bloom_levels_present:
-            stat = summary.bloom_breakdown.get(level)
-            if stat:
-                data.append(stat.awarded_marks)
-                data.append(stat.total_marks)
-                data.append(stat.percentage)
-            else:
-                data.extend(["", "", ""])
-
-        # Per-question columns
+        # Marks per question — in question order
         for qid in all_question_ids:
             qe = qe_lookup.get(qid)
             if qe:
-                data.append(qe.marks_awarded)
-                data.append(qe.maximum_marks)
-                data.append(qe.course_outcome or "")
-                data.append(qe.bloom_depth or "")
-                data.append(qe.bloom_outcome or "")
+                # Show marks only for counted questions; uncounted shown as "(x)" to flag it
+                if qe.counted:
+                    data.append(qe.marks_awarded)
+                else:
+                    data.append(f"({qe.marks_awarded})")
             else:
-                data.extend(["", "", "", "", ""])
+                data.append("")   # question not attempted
+
+        # Summary columns
+        data += [
+            summary.total_marks_awarded,
+            summary.full_marks,
+            summary.percentage,
+            "yes" if row["confirmed"] else "no",
+            summary.overall_feedback.replace("\n", " "),
+        ]
 
         writer.writerow(data)
 

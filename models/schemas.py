@@ -19,6 +19,7 @@ from models.paper import (
     PaperMetadata,
     ParsedQuestion,
     ParsedPaper,
+    PaperSection,
     PaperOcrResponse,
     PaperUploadResponse,
     RubricGenerateRequest,
@@ -67,7 +68,7 @@ __all__ = [
     "Rubric", "RubricResponse", "build_rubric_response",
     # paper
     "Strictness", "PaperMetadata", "ParsedQuestion", "ParsedPaper",
-    "PaperOcrResponse", "PaperUploadResponse",
+    "PaperSection", "PaperOcrResponse", "PaperUploadResponse",
     "RubricGenerateRequest", "RubricGenerateResponse",
     "PaperConfirmRequest", "PaperConfirmResponse",
     "PaperSummary", "PaperDetailResponse", "PaperDeleteResponse",

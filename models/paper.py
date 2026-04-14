@@ -38,11 +38,13 @@ class ParsedQuestion(BaseModel):
     max_score: int
     course_outcome: Optional[str] = None   # e.g. "CO1", "CO2" — extracted from paper if printed
     bloom_level: Optional[str] = None      # e.g. "Remember", "Analyze" — extracted from paper if printed
+    section_name: Optional[str] = None     # e.g. "Part A", "Part B" — which section this question belongs to
 
 
 class ParsedPaper(BaseModel):
-    metadata: PaperMetadata
+    metadata:  PaperMetadata
     questions: List[ParsedQuestion]
+    sections:  List["PaperSection"] = []   # empty for papers without explicit sections
 
 
 # ---------------------------------------------------------------------------
@@ -117,3 +119,25 @@ class PaperDeleteResponse(BaseModel):
     message: str
     ocr_results_deleted: int = 0
     evaluations_deleted: int = 0
+
+
+
+# ---------------------------------------------------------------------------
+# Paper Sections — "Answer any N of M questions"
+# ---------------------------------------------------------------------------
+
+class PaperSection(BaseModel):
+    """
+    Represents one section of a question paper, e.g. "Part A (2 x 5)".
+    required_count      : number of questions the student must answer (N in "any N of M")
+    marks_per_question  : marks each question in this section carries
+    question_ids        : ordered list of question_ids belonging to this section
+    """
+    section_name:       str        # e.g. "Part A", "Part B", "Part C"
+    required_count:     int        # N — number of questions to count
+    marks_per_question: float      # marks each question carries
+    question_ids:       List[int]  # question_ids that belong to this section
+
+
+# Resolve the forward reference used in ParsedPaper.sections
+ParsedPaper.model_rebuild()

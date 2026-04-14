@@ -72,6 +72,8 @@ class QuestionEvaluation(BaseModel):
     bloom_depth: Optional[str] = None    # e.g. "analyze"  — from rubric expected_depth
     bloom_outcome: Optional[str] = None  # "correct" | "partial" | "incorrect"
     course_outcome: Optional[str] = None # e.g. "CO1", "CO1, CO2" — from parsed question
+    counted: bool = True                 # False if student answered more than required and
+                                         # this question was not selected as best-N
 
 
 class ExtractedAnswer(BaseModel):
@@ -111,17 +113,22 @@ def build_evaluation_summary(
     """
     Compute all numeric summary fields from graded questions.
 
+    Only questions with counted=True contribute to total_marks_awarded,
+    percentage, and bloom_breakdown. Uncounted questions (excess answers
+    not selected as best-N) are excluded from all aggregates.
+
     bloom_breakdown  — keyed by depth level (e.g. "remember", "analyze").
-                       Only levels that appear in the evaluated questions are included.
-                       percentage = awarded / total * 100 per level.
+                       Only levels that appear in counted questions are included.
     """
-    total_attempted = sum(q.maximum_marks for q in question_wise_evaluation)
-    total_awarded   = sum(q.marks_awarded  for q in question_wise_evaluation)
+    counted_qs = [q for q in question_wise_evaluation if q.counted]
+
+    total_attempted = sum(q.maximum_marks for q in counted_qs)
+    total_awarded   = sum(q.marks_awarded  for q in counted_qs)
     percentage      = round((total_awarded / full_marks * 100), 2) if full_marks > 0 else 0.0
 
-    # Aggregate per Bloom's level
+    # Aggregate per Bloom's level — counted questions only
     bloom_totals: Dict[str, dict] = {}
-    for q in question_wise_evaluation:
+    for q in counted_qs:
         depth = q.bloom_depth
         if not depth:
             continue

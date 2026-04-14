@@ -220,6 +220,39 @@ class EvaluatorService:
                 )
             )
 
+        # ── Best-N selection per section ────────────────────────────────────────
+        # If the paper has sections with required_count < total questions offered,
+        # a student may have answered more than required.
+        # Mark excess answers as counted=False — only the best N (by marks) count.
+
+        if parsed_paper.sections:
+            qe_by_id = {qe.question_id: qe for qe in question_wise}
+
+            for section in parsed_paper.sections:
+                # Which of this section's questions did the student actually attempt?
+                attempted_in_section = [
+                    qe_by_id[qid]
+                    for qid in section.question_ids
+                    if qid in qe_by_id
+                ]
+
+                if len(attempted_in_section) <= section.required_count:
+                    # Student answered at most the required number — all count
+                    continue
+
+                # Student answered more than required — pick best N by marks_awarded
+                # (highest first; ties broken by question_id for determinism)
+                ranked = sorted(
+                    attempted_in_section,
+                    key=lambda q: (-q.marks_awarded, q.question_id),
+                )
+                counted_ids = {q.question_id for q in ranked[: section.required_count]}
+
+                # Mark excess questions
+                for qe in attempted_in_section:
+                    if qe.question_id not in counted_ids:
+                        qe.counted = False
+
         return EvaluationReport(
             student_info=student_info,      # from OCR — not re-parsed from Gemini
             extracted_answers=[],           # populated by the router after OCR

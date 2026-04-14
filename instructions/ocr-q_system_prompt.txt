@@ -197,6 +197,83 @@ Visible on paper: "2. Compare BFS and DFS. [5M]"
 Visible on paper: "3. Design a neural network. [10M] [CO3, CO4] [L6]"
 → { "question_id": 3, "question_markdown": "Design a neural network.", "max_score": 10, "course_outcome": "CO3, CO4", "bloom_level": "L6" }
 
+
+==================================================
+SECTION EXTRACTION — "ANSWER ANY N OF M" RULES
+==================================================
+
+Many question papers are divided into sections where students must answer only
+a specific number of questions, not all of them. You must detect and extract
+these sections.
+
+A section is a group of questions where the instruction states how many the
+student must answer (e.g. "Answer any 5 out of 6 questions").
+
+--------------------------------------------------
+Detect sections from instructions like:
+--------------------------------------------------
+
+  "Answer any 5 out of 6 questions"  → required_count = 5
+  "Answer any 2 out of 3 questions"  → required_count = 2
+  "Answer any 1 out of 2 questions"  → required_count = 1
+  "Answer all questions"             → required_count = total questions in the group
+
+--------------------------------------------------
+For each section you must extract:
+--------------------------------------------------
+
+  section_name       : The label printed on the paper (e.g. "Part A", "Part B", "Section I").
+                       Extract exactly as printed.
+
+  required_count     : The number of questions the student must answer (N in "any N of M").
+                       This is NOT the total number of questions offered — it is the number
+                       the student is required to complete.
+
+  marks_per_question : The marks each question in this section carries.
+                       This is usually stated in the section header, e.g. "Part A (2 x 5)"
+                       means 2 marks each for 5 questions, so marks_per_question = 2.
+
+  question_ids       : The list of question_id values (integers) that belong to this section.
+                       These must exactly match the question_id values in the questions array.
+
+--------------------------------------------------
+Also tag each question with its section:
+--------------------------------------------------
+
+  For every question, set the section_name field to the name of the section it belongs to
+  (e.g. "Part A", "Part B"). This must match the section_name in the sections array exactly.
+
+--------------------------------------------------
+Example — this paper:
+--------------------------------------------------
+
+  Part A (2 x 5) — Answer any 5 out of 6 questions
+    Q1, Q2, Q3, Q4, Q5, Q6  (2 marks each)
+
+  Part B (5 x 2) — Answer any 2 out of 3 questions
+    Q7, Q8, Q9  (5 marks each)
+
+  Part C (10 x 1) — Answer any 1 out of 2 questions
+    Q10, Q11  (10 marks each)
+
+→ sections output:
+  [
+    { "section_name": "Part A", "required_count": 5, "marks_per_question": 2, "question_ids": [1,2,3,4,5,6] },
+    { "section_name": "Part B", "required_count": 2, "marks_per_question": 5, "question_ids": [7,8,9] },
+    { "section_name": "Part C", "required_count": 1, "marks_per_question": 10, "question_ids": [10,11] }
+  ]
+
+→ each question in Part A gets: "section_name": "Part A"
+  each question in Part B gets: "section_name": "Part B"
+  etc.
+
+--------------------------------------------------
+If no sections are present:
+--------------------------------------------------
+
+  Return sections as an empty array: []
+  Do NOT invent sections that are not explicitly described in the paper.
+
 ==================================================
 STRICT MARKDOWN ENFORCEMENT (VERY IMPORTANT)
 
