@@ -12,6 +12,9 @@ from models.schemas import StudentInfo
 # Internal schemas for LLM structured output
 # ---------------------------------------------------------------------------
 
+from services.token_logger import log_token_usage
+
+
 class _StudentInfo(BaseModel):
     student_name: str
     roll_number: Optional[str] = None
@@ -48,13 +51,11 @@ def _load_system_prompt() -> str:
 
 class OCRAnswerService:
     def __init__(self):
-        api_key =  os.getenv("api_key")
-        print(api_key)
+        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("api_key")
         if not api_key:
             raise EnvironmentError("GEMINI_API_KEY environment variable not set.")
-        
         self.client = genai.Client(api_key=api_key)
-        self.model = os.getenv("OCR_MODEL")
+        self.model = os.getenv("OCR_MODEL", "gemini-2.0-flash-lite")
         self.system_prompt = _load_system_prompt()
 
     async def extract_answers(self, pdf_bytes: bytes) -> _AnswerSchema:
@@ -77,4 +78,5 @@ class OCRAnswerService:
                 )
             ],
         )
+        log_token_usage("OCR (answers)", self.model, response)
         return _AnswerSchema.model_validate_json(response.text)

@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 
 from models.schemas import ParsedPaper, PaperMetadata, ParsedQuestion, PaperSection
+from services.token_logger import log_token_usage
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +96,7 @@ class OCRService:
             ],
         )
 
+        log_token_usage("OCR (questions)", self.model, response)
         parsed = _QuizSchema.model_validate_json(response.text)
 
         questions = [

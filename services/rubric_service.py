@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 from enum import Enum
 
+from services.token_logger import log_token_usage
 from models.schemas import (
     ParsedPaper,
     Rubric,
@@ -74,25 +75,25 @@ _STRICTNESS_INSTRUCTIONS = {
     Strictness.easy: (
         "STRICTNESS: EASY — Be lenient. Award marks generously. "
         "Partial credit should be given for any reasonable attempt. "
-        "Set keyword_only_percentage to 75 and partial_explanation_percentage to 90. "
+        "Set keyword_only_percentage to 0.75 and partial_explanation_percentage to 0.90. "
         "Mark few concepts as mandatory. Accept informal or incomplete explanations."
     ),
     Strictness.medium: (
         "STRICTNESS: MEDIUM — Apply balanced marking. "
         "Award full marks for complete correct answers, partial marks for partially correct ones. "
-        "Set keyword_only_percentage to 50 and partial_explanation_percentage to 75. "
+        "Set keyword_only_percentage to 0.50 and partial_explanation_percentage to 0.75. "
         "Core concepts should be mandatory, supporting ones optional."
     ),
     Strictness.hard: (
         "STRICTNESS: HARD — Apply strict marking. "
         "Require precise terminology and thorough explanations for full marks. "
-        "Set keyword_only_percentage to 30 and partial_explanation_percentage to 60. "
+        "Set keyword_only_percentage to 0.30 and partial_explanation_percentage to 0.60. "
         "Most concepts should be mandatory. Vague or imprecise answers should score low."
     ),
     Strictness.extreme: (
         "STRICTNESS: EXTREME — Apply the most rigorous marking possible. "
         "Only award full marks for technically precise, complete, and well-structured answers. "
-        "Set keyword_only_percentage to 10 and partial_explanation_percentage to 40. "
+        "Set keyword_only_percentage to 0.10 and partial_explanation_percentage to 0.40. "
         "All key concepts must be mandatory. Any missing detail should result in significant deduction."
     ),
 }
@@ -199,6 +200,7 @@ class RubricService:
             contents=parsed_paper.model_dump_json(),
         )
 
+        log_token_usage("Rubric generation", self.model, response)
         parsed = _RubricSchema.model_validate_json(response.text)
 
         return Rubric(

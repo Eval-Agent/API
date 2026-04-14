@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 from enum import Enum
 
+from services.token_logger import log_token_usage
 from models.rubric import Rubric, RubricResponse
 from models.paper import ParsedPaper
 from models.evaluation import (
@@ -153,6 +154,7 @@ class EvaluatorService:
             contents=prompt,
         )
 
+        log_token_usage("Evaluation", self.model, response)
         parsed = _EvaluationReport.model_validate_json(response.text)
 
         # Build rubric lookups for deterministic mark computation
