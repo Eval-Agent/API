@@ -205,12 +205,12 @@ class EvaluatorService:
                 for c in qe.concept_evaluations
             ]
 
-            q_marks_awarded = sum(c.marks_awarded for c in concept_evals)
+            q_marks_awarded = round(sum(c.marks_awarded for c in concept_evals), 2)
             bloom_depth = rubric_q.expected_depth.value if rubric_q else None
             question_wise.append(
                 QuestionEvaluation(
                     question_id=qe.question_id,
-                    maximum_marks=qe.maximum_marks,
+                    maximum_marks=round(qe.maximum_marks, 2),
                     concept_evaluations=concept_evals,
                     marks_awarded=q_marks_awarded,
                     justification=qe.justification,

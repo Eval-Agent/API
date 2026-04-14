@@ -150,9 +150,9 @@ def build_evaluation_summary(
     }
 
     return EvaluationSummary(
-        full_marks=full_marks,
-        total_attempted=total_attempted,
-        total_marks_awarded=total_awarded,
+        full_marks=round(full_marks, 2),
+        total_attempted=round(total_attempted, 2),
+        total_marks_awarded=round(total_awarded, 2),
         percentage=percentage,
         overall_feedback=overall_feedback,
         bloom_breakdown=bloom_breakdown,
