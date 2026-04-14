@@ -40,6 +40,7 @@ _rubric_svc = RubricService()
         "metadata. No rubric is generated yet. Returns paper_id and parsed_paper. "
         "Call /papers/{paper_id}/rubric:generate next with the desired strictness."
     ),
+    tags=["Question Papers"],
 )
 async def upload_paper(
     file: UploadFile = File(..., description="Question paper PDF"),
@@ -103,6 +104,7 @@ async def upload_paper(
         "Can be called multiple times to regenerate with a different strictness. "
         "Call /papers/{paper_id}:confirm after reviewing."
     ),
+    tags=["Question Papers"],
 )
 async def generate_rubric(
     paper_id: str,
@@ -150,6 +152,7 @@ async def generate_rubric(
         "the parsed questions and rubric. Marks the paper as confirmed. "
         "A rubric must have been generated before confirming."
     ),
+    tags=["Question Papers"],
 )
 async def confirm_paper(
     paper_id: str,
@@ -184,6 +187,7 @@ async def confirm_paper(
     "",
     response_model=list[PaperSummary],
     summary="List all uploaded papers",
+    tags=["Question Papers"],
 )
 async def list_papers(db: aiosqlite.Connection = Depends(get_db)):
     repo = PaperRepository(db)
@@ -198,6 +202,7 @@ async def list_papers(db: aiosqlite.Connection = Depends(get_db)):
     "/{paper_id}",
     response_model=PaperDetailResponse,
     summary="Get full detail of a specific paper",
+    tags=["Question Papers"],
 )
 async def get_paper(
     paper_id: str,
@@ -222,6 +227,7 @@ async def get_paper(
         "Permanently removes a paper, its rubric, all linked submissions, "
         "and all evaluations. This action is irreversible."
     ),
+    tags=["Question Papers"],
 )
 async def delete_paper(
     paper_id: str,

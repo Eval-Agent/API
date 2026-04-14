@@ -47,7 +47,7 @@ app.add_middleware(
 #          POST /papers/{id}/rubric:generate, POST /papers/{id}:confirm
 #          POST /papers/{id}/submissions, GET /papers/{id}/submissions
 #          GET  /papers/{id}/evaluations
-app.include_router(papers.router,                  prefix="/api/v1/papers",      tags=["Question Papers"])
+app.include_router(papers.router,                  prefix="/api/v1/papers")
 app.include_router(submissions_papers_router,      prefix="/api/v1/papers")
 app.include_router(evaluations_papers_router,      prefix="/api/v1/papers")
 
