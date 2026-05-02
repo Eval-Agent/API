@@ -18,7 +18,6 @@ from models.history import EvaluationHistoryRecord, RubricHistoryRecord
 
 def _row_to_rubric_record(row: aiosqlite.Row) -> RubricHistoryRecord:
     return RubricHistoryRecord(
-        history_id=row["history_id"],
         paper_id=row["paper_id"],
         rubric_json=json.loads(row["rubric_json"]),
         parsed_paper_json=json.loads(row["parsed_paper_json"]),
@@ -29,7 +28,6 @@ def _row_to_rubric_record(row: aiosqlite.Row) -> RubricHistoryRecord:
 
 def _row_to_eval_record(row: aiosqlite.Row) -> EvaluationHistoryRecord:
     return EvaluationHistoryRecord(
-        history_id=row["history_id"],
         eval_id=row["eval_id"],
         evaluation_json=json.loads(row["evaluation_json"]),
         changed_at=row["changed_at"],
@@ -77,11 +75,11 @@ class HistoryRepository:
         self.db.row_factory = aiosqlite.Row
         async with self.db.execute(
             """
-            SELECT history_id, paper_id, rubric_json, parsed_paper_json,
+            SELECT paper_id, rubric_json, parsed_paper_json,
                    changed_at, action
             FROM   rubric_history
             WHERE  paper_id = ?
-            ORDER  BY history_id DESC
+            ORDER  BY changed_at DESC
             """,
             (paper_id,),
         ) as cursor:
@@ -116,10 +114,10 @@ class HistoryRepository:
         self.db.row_factory = aiosqlite.Row
         async with self.db.execute(
             """
-            SELECT history_id, eval_id, evaluation_json, changed_at, action
+            SELECT eval_id, evaluation_json, changed_at, action
             FROM   evaluation_history
             WHERE  eval_id = ?
-            ORDER  BY history_id DESC
+            ORDER  BY changed_at DESC
             """,
             (eval_id,),
         ) as cursor:

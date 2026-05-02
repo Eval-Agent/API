@@ -8,7 +8,6 @@ from pydantic import BaseModel
 
 class RubricHistoryRecord(BaseModel):
     """A single snapshot of rubric + parsed-paper state before a confirm."""
-    history_id: int
     paper_id: str
     rubric_json: Dict[str, Any]        # deserialised Rubric payload
     parsed_paper_json: Dict[str, Any]  # deserialised ParsedPaper payload
@@ -27,7 +26,6 @@ class RubricHistoryResponse(BaseModel):
 
 class EvaluationHistoryRecord(BaseModel):
     """A single snapshot of an EvaluationReport state before a confirm."""
-    history_id: int
     eval_id: str
     evaluation_json: Dict[str, Any]    # deserialised EvaluationReport payload
     changed_at: str
