@@ -10,6 +10,7 @@ from models.schemas import (
     ExtractedAnswer,
     StudentInfo,
 )
+from db.history_repository import HistoryRepository
 
 
 # ---------------------------------------------------------------------------
@@ -249,7 +250,29 @@ class EvaluationRepository:
         )
         await self.db.commit()
 
-    async def confirm(self, eval_id: str, report: EvaluationReport) -> None:
+    async def confirm(self, eval_id: str, report) -> None:   # report: EvaluationReport
+        """
+        1. Snapshot current DB state into evaluation_history.
+        2. Overwrite with the new (confirmed) values.
+        Both writes share one commit → atomic.
+        """
+        # -- Step 1: fetch current evaluation JSON.
+        self.db.row_factory = aiosqlite.Row
+        async with self.db.execute(
+            "SELECT evaluation FROM evaluations WHERE eval_id = ?",
+            (eval_id,),
+        ) as cur:
+            row = await cur.fetchone()
+
+        if row and row["evaluation"] is not None:
+            history_repo = HistoryRepository(self.db)
+            await history_repo.save_evaluation_snapshot(
+                eval_id=eval_id,
+                evaluation_json=row["evaluation"],
+                action="confirm",
+            )
+
+        # -- Step 2: write the new confirmed state.
         await self.db.execute(
             """
             UPDATE evaluations

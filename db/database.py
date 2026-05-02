@@ -13,6 +13,7 @@ async def init_db():
         await db.execute("""
             CREATE TABLE IF NOT EXISTS papers (
                 paper_id     TEXT PRIMARY KEY,
+                user_id      TEXT NOT NULL,
                 sha256_hash  TEXT UNIQUE NOT NULL,
                 parsed_paper TEXT NOT NULL,
                 rubric       TEXT,
@@ -42,6 +43,35 @@ async def init_db():
                 created_at    TEXT NOT NULL DEFAULT (datetime('now'))
             )
         """)
+
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS rubric_history (
+                history_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                paper_id           TEXT    NOT NULL REFERENCES papers(paper_id) ON DELETE CASCADE,
+                rubric_json        TEXT    NOT NULL,
+                parsed_paper_json  TEXT    NOT NULL,
+                changed_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+                action             TEXT    NOT NULL CHECK(action IN ('confirm', 'edit'))
+            )
+        """)
+
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS evaluation_history (
+                history_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                eval_id          TEXT    NOT NULL REFERENCES evaluations(eval_id) ON DELETE CASCADE,
+                evaluation_json  TEXT    NOT NULL,
+                changed_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+                action           TEXT    NOT NULL CHECK(action IN ('confirm', 'edit'))
+            )
+        """)
+
+        # ── Migration: add user_id column ──────────────────────────────────────
+        papers_cols = {
+            row[1]: row[3]
+            async for row in await db.execute("PRAGMA table_info(papers)")
+        }
+        if "user_id" not in papers_cols:
+            await db.execute("ALTER TABLE papers ADD COLUMN user_id TEXT NOT NULL DEFAULT 'default'")
 
         # ── Migration: make rubric nullable (drop NOT NULL) ───────────────────
         papers_cols = {
