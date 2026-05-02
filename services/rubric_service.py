@@ -45,12 +45,22 @@ class _PartialMarkingRule(BaseModel):
 
 
 class _RubricQuestion(BaseModel):
-    question_id: int
-    question_text: str
-    total_marks: float
-    expected_depth: _ExpectedDepth
-    concepts: List[_Concept]
-    partial_marking_rule: _PartialMarkingRule
+    """
+    Unified rubric question schema sent to Gemini.
+    For MCQ questions: question_type="mcq", correct_options set, no concepts/depth.
+    For descriptive:   question_type="descriptive", concepts/depth set, no correct_options.
+    """
+    question_id:    int
+    question_text:  str
+    total_marks:    float
+    question_type:  str = "descriptive"           # "mcq" | "descriptive"
+    # Descriptive fields
+    expected_depth:       Optional[_ExpectedDepth]    = None
+    concepts:             Optional[List[_Concept]]    = None
+    partial_marking_rule: Optional[_PartialMarkingRule] = None
+    # MCQ fields
+    correct_options:  Optional[List[str]] = None  # list of correct option labels/texts e.g. ["B"] or ["A","C"]
+    is_multi_select:  bool = False                # True if more than one option must be selected
 
 
 class _RubricSchema(BaseModel):
@@ -203,21 +213,48 @@ class RubricService:
         log_token_usage("Rubric generation", self.model, response)
         parsed = _RubricSchema.model_validate_json(response.text)
 
-        return Rubric(
-            questions=[
-                RubricQuestion(
-                    question_id=q.question_id,
-                    question_text=q.question_text,
-                    total_marks=q.total_marks,
-                    # Use printed bloom_level if available, otherwise trust Gemini
-                    expected_depth=ExpectedDepth(
-                        bloom_override.get(q.question_id, q.expected_depth.value)
-                    ),
-                    concepts=[Concept(**c.model_dump()) for c in q.concepts],
-                    partial_marking_rule=PartialMarkingRule(
-                        **q.partial_marking_rule.model_dump()
-                    ),
+        # Build a lookup of question_type from parsed paper
+        pq_lookup = {pq.question_id: pq for pq in parsed_paper.questions}
+
+        rubric_questions = []
+        for q in parsed.questions:
+            pq = pq_lookup.get(q.question_id)
+            q_type = (pq.question_type if pq else None) or q.question_type or "descriptive"
+
+            if q_type == "mcq":
+                rubric_questions.append(
+                    RubricQuestion(
+                        question_id=q.question_id,
+                        question_text=q.question_text,
+                        total_marks=q.total_marks,
+                        question_type="mcq",
+                        correct_options=q.correct_options or [],
+                        is_multi_select=q.is_multi_select,
+                        options=pq.options if pq else None,
+                        expected_depth=None,
+                        concepts=None,
+                        partial_marking_rule=None,
+                    )
                 )
-                for q in parsed.questions
-            ],
-        )
+            else:
+                rubric_questions.append(
+                    RubricQuestion(
+                        question_id=q.question_id,
+                        question_text=q.question_text,
+                        total_marks=q.total_marks,
+                        question_type="descriptive",
+                        expected_depth=ExpectedDepth(
+                            bloom_override.get(q.question_id, q.expected_depth.value)
+                        ) if q.expected_depth else ExpectedDepth.remember,
+                        concepts=[Concept(**c.model_dump()) for c in q.concepts] if q.concepts else [],
+                        partial_marking_rule=PartialMarkingRule(
+                            **q.partial_marking_rule.model_dump()
+                        ) if q.partial_marking_rule else PartialMarkingRule(
+                            keyword_only_percentage=0.5,
+                            partial_explanation_percentage=0.75,
+                        ),
+                        correct_option=None,
+                    )
+                )
+
+        return Rubric(questions=rubric_questions)

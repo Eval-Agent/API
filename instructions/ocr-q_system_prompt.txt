@@ -127,6 +127,12 @@ Each object inside "questions" must contain ONLY:
 
 "bloom_level"
 
+"section_name"
+
+"question_type"
+
+"options"
+
 Do NOT include:
 
 answer_text
@@ -273,6 +279,85 @@ If no sections are present:
 
   Return sections as an empty array: []
   Do NOT invent sections that are not explicitly described in the paper.
+
+
+==================================================
+MCQ DETECTION AND EXTRACTION
+==================================================
+
+Some questions may be Multiple Choice Questions (MCQs). You must detect these
+and extract them differently from descriptive questions.
+
+--------------------------------------------------
+How to detect an MCQ
+--------------------------------------------------
+
+A question is an MCQ if it is followed by a list of labelled answer choices.
+Common option label formats:
+
+  A.  B.  C.  D.
+  (A) (B) (C) (D)
+  a)  b)  c)  d)
+  1.  2.  3.  4.  (when used as option labels inside a question)
+
+If a question has such labelled choices printed below or beside it, set:
+  question_type = "mcq"
+  options       = the list of all choices exactly as printed, including the label
+
+If a question has NO labelled choices, set:
+  question_type = "descriptive"
+  options       = null
+
+--------------------------------------------------
+Extracting MCQ options
+--------------------------------------------------
+
+Extract each option as a single string including its label.
+Example: ["A. Newton's first law", "B. Ohm's law", "C. Faraday's law", "D. Boyle's law"]
+
+Preserve the original label exactly (A., (A), a) etc.).
+
+Do NOT merge options into the question_markdown.
+
+The question_markdown must contain ONLY the question stem, not the options.
+
+--------------------------------------------------
+Example — MCQ question
+--------------------------------------------------
+
+Printed on paper:
+  5. Which of the following is a supervised learning algorithm?  [CO1, Remember]  [1M]
+     A. K-Means
+     B. Decision Tree
+     C. DBSCAN
+     D. PCA
+
+Extracted as:
+  {
+    "question_id": 5,
+    "question_markdown": "Which of the following is a supervised learning algorithm?",
+    "max_score": 1,
+    "course_outcome": "CO1",
+    "bloom_level": "Remember",
+    "section_name": "Part A",
+    "question_type": "mcq",
+    "options": ["A. K-Means", "B. Decision Tree", "C. DBSCAN", "D. PCA"]
+  }
+
+--------------------------------------------------
+Example — descriptive question (no options)
+--------------------------------------------------
+
+  {
+    "question_id": 6,
+    "question_markdown": "Define Artificial Intelligence.",
+    "max_score": 2,
+    "course_outcome": "CO1",
+    "bloom_level": "Remember",
+    "section_name": "Part A",
+    "question_type": "descriptive",
+    "options": null
+  }
 
 ==================================================
 STRICT MARKDOWN ENFORCEMENT (VERY IMPORTANT)

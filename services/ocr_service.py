@@ -32,6 +32,8 @@ class _Question(BaseModel):
     course_outcome: Optional[str] = None
     bloom_level: Optional[str] = None
     section_name: Optional[str] = None   # e.g. "Part A", "Part B", "Part C"
+    question_type: str = "descriptive"   # "mcq" | "descriptive"
+    options: Optional[List[str]] = None  # MCQ options exactly as printed e.g. ["A. ...", "B. ..."]
 
 
 class _Section(BaseModel):
@@ -107,6 +109,8 @@ class OCRService:
                 course_outcome=q.course_outcome or None,
                 bloom_level=q.bloom_level or None,
                 section_name=q.section_name or None,
+                question_type=q.question_type or "descriptive",
+                options=q.options or None,
             )
             for q in parsed.questions
         ]

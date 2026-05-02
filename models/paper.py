@@ -39,6 +39,8 @@ class ParsedQuestion(BaseModel):
     course_outcome: Optional[str] = None   # e.g. "CO1", "CO2" — extracted from paper if printed
     bloom_level: Optional[str] = None      # e.g. "Remember", "Analyze" — extracted from paper if printed
     section_name: Optional[str] = None     # e.g. "Part A", "Part B" — which section this question belongs to
+    question_type: str = "descriptive"     # "mcq" | "descriptive" — detected by OCR
+    options: Optional[List[str]] = None    # MCQ answer options exactly as printed, e.g. ["A. ...", "B. ...", ...]
 
 
 class ParsedPaper(BaseModel):

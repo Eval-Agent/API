@@ -36,6 +36,79 @@ If a question already contains a "bloom_level" field with a non-null value,
 that value is the officially printed Bloom's level from the question paper.
 Set expected_depth to match it. Only infer from the question text when bloom_level is null.
 
+
+==================================================
+MCQ QUESTIONS — SPECIAL RUBRIC RULES
+==================================================
+
+If a question has question_type = "mcq", it must be treated differently
+from descriptive questions. Do NOT apply the standard concept/keyword rubric.
+
+For MCQ questions you must output ONLY:
+
+  question_id      : the question number
+  question_text    : the question stem (not the options)
+  total_marks      : marks this question carries
+  question_type    : "mcq"
+  correct_options  : a JSON array of the correct option(s) exactly as they appear in the options list.
+                     Single-answer example : ["B. Decision Tree"]
+                     Multi-select example  : ["A. K-Means", "C. DBSCAN"]
+  is_multi_select  : true if the question requires selecting more than one option, false otherwise.
+
+Do NOT include for MCQ questions:
+  - expected_depth
+  - concepts
+  - partial_marking_rule
+
+There is no partial marking for MCQs. The student must select all correct options
+and no incorrect ones to receive full marks. Any mismatch = zero marks.
+
+--------------------------------------------------
+Example — single-answer MCQ rubric entry
+--------------------------------------------------
+
+Input:
+  {
+    "question_id": 5,
+    "question_markdown": "Which of the following is a supervised learning algorithm?",
+    "max_score": 1,
+    "question_type": "mcq",
+    "options": ["A. K-Means", "B. Decision Tree", "C. DBSCAN", "D. PCA"]
+  }
+
+Output:
+  {
+    "question_id": 5,
+    "question_text": "Which of the following is a supervised learning algorithm?",
+    "total_marks": 1,
+    "question_type": "mcq",
+    "correct_options": ["B. Decision Tree"],
+    "is_multi_select": false
+  }
+
+--------------------------------------------------
+Example — multi-select MCQ rubric entry
+--------------------------------------------------
+
+Input:
+  {
+    "question_id": 6,
+    "question_markdown": "Which of the following are unsupervised learning algorithms? (Select all that apply)",
+    "max_score": 2,
+    "question_type": "mcq",
+    "options": ["A. K-Means", "B. Decision Tree", "C. DBSCAN", "D. Linear Regression"]
+  }
+
+Output:
+  {
+    "question_id": 6,
+    "question_text": "Which of the following are unsupervised learning algorithms? (Select all that apply)",
+    "total_marks": 2,
+    "question_type": "mcq",
+    "correct_options": ["A. K-Means", "C. DBSCAN"],
+    "is_multi_select": true
+  }
+
 ==================================================
 OUTPUT RULES
 ==================================================

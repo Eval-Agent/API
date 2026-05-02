@@ -166,6 +166,16 @@ class EvaluatorService:
             for pq in parsed_paper.questions
         }
 
+        # Build answer lookup for MCQ deterministic scoring
+        answer_lookup = {a.question_id: a.answer_markdown.strip() for a in answers}
+
+        # Separate MCQ question IDs — these are scored in Python, not by Gemini
+        mcq_ids = {
+            rq.question_id
+            for rq in rubric.questions
+            if rq.question_type == "mcq"
+        }
+
         def _concept_marks(
             verdict: _ConceptVerdict,
             marks_allocated: float,
@@ -179,7 +189,81 @@ class EvaluatorService:
                 return 0.0
 
         question_wise = []
+
+        # ── MCQ scoring — pure Python, no Gemini ─────────────────────────────
+        for rq in rubric.questions:
+            if rq.question_type != "mcq":
+                continue
+
+            correct_options = rq.correct_options or []
+
+            # Normalise a label to just its leading letter (e.g. "B. Decision Tree" → "B")
+            def _label(s: str) -> str:
+                s = s.strip()
+                if s and s[0].isalpha() and len(s) > 1 and s[1] in (".", ")"):
+                    return s[0].upper()
+                return s.upper()
+
+            correct_labels = {_label(c) for c in correct_options}
+
+            # Get student's selected labels from OCR
+            student_answer = next(
+                (a for a in answers if a.question_id == rq.question_id), None
+            )
+            raw_labels = getattr(student_answer, "selected_option_labels", None) if student_answer else None
+            if raw_labels:
+                student_labels = {_label(l) for l in raw_labels}
+            elif student_answer:
+                # Fallback: try to parse from answer_markdown
+                student_labels = {_label(student_answer.answer_markdown.strip())}
+            else:
+                student_labels = set()
+
+            # Full marks only if selection exactly matches correct set (no partial credit)
+            is_correct    = student_labels == correct_labels and len(student_labels) > 0
+            marks_awarded = rq.total_marks if is_correct else 0.0
+            verdict_str   = "correct" if is_correct else "incorrect"
+
+            # Human-readable answer display
+            student_display  = ", ".join(sorted(student_labels)) if student_labels else "(no answer)"
+            correct_display  = ", ".join(sorted(correct_labels))
+            multi_note       = " (multi-select)" if rq.is_multi_select else ""
+
+            mcq_eval = ConceptEvaluation(
+                concept_name=f"MCQ Answer{multi_note}",
+                marks_allocated=rq.total_marks,
+                marks_awarded=marks_awarded,
+                verdict=ConceptVerdict(verdict_str),
+                reason=(
+                    f"Student selected: '{student_display}'. "
+                    f"Correct answer: '{correct_display}'. "
+                    + ("Correct." if is_correct else "Incorrect — full marks require exact match.")
+                ),
+            )
+            question_wise.append(
+                QuestionEvaluation(
+                    question_id=rq.question_id,
+                    maximum_marks=rq.total_marks,
+                    concept_evaluations=[mcq_eval],
+                    marks_awarded=marks_awarded,
+                    justification=(
+                        f"MCQ{multi_note}: student selected '{student_display}', "
+                        f"correct answer is '{correct_display}'."
+                    ),
+                    strengths=["Correct option selected."] if is_correct else [],
+                    areas_for_improvement=[] if is_correct else [
+                        f"Incorrect. The correct answer is '{correct_display}'."
+                    ],
+                    bloom_depth="mcq",
+                    bloom_outcome=_bloom_outcome(marks_awarded, rq.total_marks),
+                    course_outcome=co_lookup.get(rq.question_id),
+                )
+            )
+
+        # ── Descriptive scoring — via Gemini ─────────────────────────────────
         for qe in parsed.question_wise_evaluation:
+            if qe.question_id in mcq_ids:
+                continue   # already scored above
             rubric_q    = rubric_q_lookup.get(qe.question_id)
             partial_pct = (
                 rubric_q.partial_marking_rule.partial_explanation_percentage / 100
@@ -205,12 +289,12 @@ class EvaluatorService:
                 for c in qe.concept_evaluations
             ]
 
-            q_marks_awarded = round(sum(c.marks_awarded for c in concept_evals), 2)
+            q_marks_awarded = sum(c.marks_awarded for c in concept_evals)
             bloom_depth = rubric_q.expected_depth.value if rubric_q else None
             question_wise.append(
                 QuestionEvaluation(
                     question_id=qe.question_id,
-                    maximum_marks=round(qe.maximum_marks, 2),
+                    maximum_marks=qe.maximum_marks,
                     concept_evaluations=concept_evals,
                     marks_awarded=q_marks_awarded,
                     justification=qe.justification,

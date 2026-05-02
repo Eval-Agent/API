@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 from enum import Enum
 
 
@@ -14,7 +14,7 @@ class ExpectedDepth(str, Enum):
     apply      = "apply"       # Use knowledge to solve a problem or demonstrate
     analyze    = "analyze"     # Break down, compare, differentiate, or examine
     evaluate   = "evaluate"    # Justify, critique, assess, or argue a position
-    create     = "create"      # Design, construct, propose, or synthesise something new"
+    create     = "create"      # Design, construct, propose, or synthesise something new
 
 
 class Concept(BaseModel):
@@ -31,12 +31,20 @@ class PartialMarkingRule(BaseModel):
 
 
 class RubricQuestion(BaseModel):
-    question_id: int
+    question_id:   int
     question_text: str
-    total_marks: float
-    expected_depth: ExpectedDepth
-    concepts: List[Concept]
-    partial_marking_rule: PartialMarkingRule
+    total_marks:   float
+    question_type: str = "descriptive"          # "mcq" | "descriptive"
+
+    # Descriptive-only fields (None for MCQ questions)
+    expected_depth:       Optional[ExpectedDepth]    = None
+    concepts:             Optional[List[Concept]]    = None
+    partial_marking_rule: Optional[PartialMarkingRule] = None
+
+    # MCQ-only fields (None for descriptive questions)
+    correct_options:  Optional[List[str]] = None  # e.g. ["B"] or ["A. K-Means", "C. DBSCAN"] for multi-select
+    options:          Optional[List[str]] = None  # all printed options, for display
+    is_multi_select:  bool = False                # True if student must pick more than one option
 
 
 class Rubric(BaseModel):
