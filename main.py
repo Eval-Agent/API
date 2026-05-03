@@ -56,7 +56,7 @@ app.add_middleware(
 app.include_router(papers.router, prefix="/api/v1/papers")
 app.include_router(submissions_papers_router, prefix="/api/v1/papers")
 app.include_router(evaluations_papers_router, prefix="/api/v1/papers")
-app.include_router(papers_history_router, prefix="/api/v1/papers")
+app.include_router(papers_history_router, prefix="/api/v1")
 
 # ── /api/v1/submissions  ───────────────────────────────────────────────────
 # Handles: GET /submissions/{id}, POST /submissions/{id}:update-student-info
@@ -65,7 +65,7 @@ app.include_router(papers_history_router, prefix="/api/v1/papers")
 #          POST /submissions/{id}/evaluation:confirm
 app.include_router(submissions_flat_router, prefix="/api/v1/submissions")
 app.include_router(evaluations_submissions_router, prefix="/api/v1/submissions")
-app.include_router(eval_history_router, prefix="/api/v1/submissions")
+app.include_router(eval_history_router, prefix="/api/v1")
 
 # ── /api/v1/evaluations  ──────────────────────────────────────────────────
 # Handles: GET /evaluations/{eval_id}, DELETE /evaluations/{eval_id}
