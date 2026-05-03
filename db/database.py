@@ -13,6 +13,7 @@ async def init_db():
         await db.execute("""
             CREATE TABLE IF NOT EXISTS papers (
                 paper_id     TEXT PRIMARY KEY,
+                user_id      TEXT NOT NULL,
                 sha256_hash  TEXT UNIQUE NOT NULL,
                 parsed_paper TEXT NOT NULL,
                 rubric       TEXT,
@@ -42,6 +43,35 @@ async def init_db():
                 created_at    TEXT NOT NULL DEFAULT (datetime('now'))
             )
         """)
+
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS rubric_history (
+                paper_id           TEXT    NOT NULL REFERENCES papers(paper_id) ON DELETE CASCADE,
+                rubric_json        TEXT    NOT NULL,
+                parsed_paper_json  TEXT    NOT NULL,
+                changed_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+                action             TEXT    NOT NULL CHECK(action IN ('confirm', 'edit')),
+                PRIMARY KEY (paper_id, changed_at)
+            )
+        """)
+
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS evaluation_history (
+                eval_id          TEXT    NOT NULL REFERENCES evaluations(eval_id) ON DELETE CASCADE,
+                evaluation_json  TEXT    NOT NULL,
+                changed_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+                action           TEXT    NOT NULL CHECK(action IN ('confirm', 'edit')),
+                PRIMARY KEY (eval_id, changed_at)
+            )
+        """)
+
+        # ── Migration: add user_id column ──────────────────────────────────────
+        papers_cols = {
+            row[1]: row[3]
+            async for row in await db.execute("PRAGMA table_info(papers)")
+        }
+        if "user_id" not in papers_cols:
+            await db.execute("ALTER TABLE papers ADD COLUMN user_id TEXT NOT NULL DEFAULT 'default'")
 
         # ── Migration: make rubric nullable (drop NOT NULL) ───────────────────
         papers_cols = {
@@ -133,6 +163,54 @@ async def init_db():
                     FROM _evaluations_old
                 """)
             await db.execute("DROP TABLE _evaluations_old")
+
+        # ── Migration: drop history_id from history tables if exists ────────────
+        # Check and migrate rubric_history
+        rubric_cols = {
+            row[1]: row[3]
+            async for row in await db.execute("PRAGMA table_info(rubric_history)")
+        }
+        if "history_id" in rubric_cols:
+            await db.execute("ALTER TABLE rubric_history RENAME TO _rubric_history_old")
+            await db.execute("""
+                CREATE TABLE rubric_history (
+                    paper_id           TEXT    NOT NULL REFERENCES papers(paper_id) ON DELETE CASCADE,
+                    rubric_json        TEXT    NOT NULL,
+                    parsed_paper_json  TEXT    NOT NULL,
+                    changed_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+                    action             TEXT    NOT NULL CHECK(action IN ('confirm', 'edit')),
+                    PRIMARY KEY (paper_id, changed_at)
+                )
+            """)
+            await db.execute("""
+                INSERT INTO rubric_history (paper_id, rubric_json, parsed_paper_json, changed_at, action)
+                SELECT paper_id, rubric_json, parsed_paper_json, changed_at, action
+                FROM _rubric_history_old
+            """)
+            await db.execute("DROP TABLE _rubric_history_old")
+
+        # Check and migrate evaluation_history
+        eval_hist_cols = {
+            row[1]: row[3]
+            async for row in await db.execute("PRAGMA table_info(evaluation_history)")
+        }
+        if "history_id" in eval_hist_cols:
+            await db.execute("ALTER TABLE evaluation_history RENAME TO _evaluation_history_old")
+            await db.execute("""
+                CREATE TABLE evaluation_history (
+                    eval_id          TEXT    NOT NULL REFERENCES evaluations(eval_id) ON DELETE CASCADE,
+                    evaluation_json  TEXT    NOT NULL,
+                    changed_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+                    action           TEXT    NOT NULL CHECK(action IN ('confirm', 'edit')),
+                    PRIMARY KEY (eval_id, changed_at)
+                )
+            """)
+            await db.execute("""
+                INSERT INTO evaluation_history (eval_id, evaluation_json, changed_at, action)
+                SELECT eval_id, evaluation_json, changed_at, action
+                FROM _evaluation_history_old
+            """)
+            await db.execute("DROP TABLE _evaluation_history_old")
 
         await db.commit()
 
