@@ -1,3 +1,14 @@
+"""
+models/rubric.py
+----------------
+Rubric data models.
+
+question_id is now a **string** to match the hierarchical QuestionNode IDs
+in models/paper.py.  All other fields are unchanged.
+"""
+
+from __future__ import annotations
+
 from pydantic import BaseModel
 from typing import List, Optional
 from enum import Enum
@@ -8,43 +19,43 @@ from enum import Enum
 # ---------------------------------------------------------------------------
 
 class ExpectedDepth(str, Enum):
-    """Bloom's Taxonomy cognitive levels — used to set the expected answer depth per question."""
-    remember   = "remember"    # Recall facts, definitions, or lists
-    understand = "understand"  # Explain, summarise, or describe in own words
-    apply      = "apply"       # Use knowledge to solve a problem or demonstrate
-    analyze    = "analyze"     # Break down, compare, differentiate, or examine
-    evaluate   = "evaluate"    # Justify, critique, assess, or argue a position
-    create     = "create"      # Design, construct, propose, or synthesise something new
+    """Bloom's Taxonomy cognitive levels."""
+    remember   = "remember"
+    understand = "understand"
+    apply      = "apply"
+    analyze    = "analyze"
+    evaluate   = "evaluate"
+    create     = "create"
 
 
 class Concept(BaseModel):
-    concept_name: str
-    description: str
-    keywords: List[str]
+    concept_name:    str
+    description:     str
+    keywords:        List[str]
     marks_allocated: float
-    mandatory: bool
+    mandatory:       bool
 
 
 class PartialMarkingRule(BaseModel):
-    keyword_only_percentage: float
+    keyword_only_percentage:      float
     partial_explanation_percentage: float
 
 
 class RubricQuestion(BaseModel):
-    question_id:   int
+    question_id:   str              # ← string now (was int)
     question_text: str
     total_marks:   float
-    question_type: str = "descriptive"          # "mcq" | "descriptive"
+    question_type: str = "descriptive"    # "mcq" | "descriptive"
 
-    # Descriptive-only fields (None for MCQ questions)
-    expected_depth:       Optional[ExpectedDepth]    = None
-    concepts:             Optional[List[Concept]]    = None
+    # Descriptive-only fields (None for MCQ)
+    expected_depth:       Optional[ExpectedDepth]      = None
+    concepts:             Optional[List[Concept]]      = None
     partial_marking_rule: Optional[PartialMarkingRule] = None
 
-    # MCQ-only fields (None for descriptive questions)
-    correct_options:  Optional[List[str]] = None  # e.g. ["B"] or ["A. K-Means", "C. DBSCAN"] for multi-select
-    options:          Optional[List[str]] = None  # all printed options, for display
-    is_multi_select:  bool = False                # True if student must pick more than one option
+    # MCQ-only fields (None for descriptive)
+    correct_options: Optional[List[str]] = None   # e.g. ["B. Decision Tree"]
+    options:         Optional[List[str]] = None   # all printed options
+    is_multi_select: bool                = False
 
 
 class Rubric(BaseModel):
@@ -55,20 +66,18 @@ class Rubric(BaseModel):
 class RubricResponse(BaseModel):
     """
     API response model.
-    total_questions and total_marks are computed in Python —
-    Gemini is never asked to produce them.
+    total_questions and total_marks are computed in Python.
     """
     total_questions: int
-    total_marks: float
-    questions: List[RubricQuestion]
+    total_marks:     float
+    questions:       List[RubricQuestion]
 
 
 # ---------------------------------------------------------------------------
-# Rubric Helpers
+# Helpers
 # ---------------------------------------------------------------------------
 
 def build_rubric_response(rubric: Rubric) -> RubricResponse:
-    """Compute total_questions and total_marks from the questions list."""
     return RubricResponse(
         total_questions=len(rubric.questions),
         total_marks=sum(q.total_marks for q in rubric.questions),

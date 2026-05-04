@@ -1,3 +1,14 @@
+"""
+db/repository.py
+----------------
+PaperRepository — all persistence for question papers.
+
+Compatible with the hierarchical ParsedPaper model introduced in models/paper.py.
+question_id is now a string throughout; no integer IDs remain.
+"""
+
+from __future__ import annotations
+
 import json
 import aiosqlite
 from typing import Optional
@@ -15,18 +26,14 @@ class PaperRepository:
             "SELECT * FROM papers WHERE sha256_hash = ?", (sha256_hash,)
         ) as cursor:
             row = await cursor.fetchone()
-            if not row:
-                return None
-            return self._row_to_detail(row)
+            return self._row_to_detail(row) if row else None
 
     async def find_by_id(self, paper_id: str) -> Optional[PaperDetailResponse]:
         async with self.db.execute(
             "SELECT * FROM papers WHERE paper_id = ?", (paper_id,)
         ) as cursor:
             row = await cursor.fetchone()
-            if not row:
-                return None
-            return self._row_to_detail(row)
+            return self._row_to_detail(row) if row else None
 
     async def insert(
         self,
@@ -42,7 +49,7 @@ class PaperRepository:
             """,
             (
                 paper_id,
-                "default",  # TODO: get from auth context
+                "default",   # TODO: get from auth context
                 sha256_hash,
                 parsed_paper.model_dump_json(),
                 rubric.model_dump_json() if rubric else None,
@@ -59,17 +66,15 @@ class PaperRepository:
 
     async def confirm(
         self,
-        paper_id: str,
-        parsed_paper,   # ParsedPaper
-        rubric,         # Rubric
+        paper_id:     str,
+        parsed_paper: ParsedPaper,
+        rubric:       Rubric,
     ) -> None:
         """
         1. Snapshot current DB state into rubric_history.
         2. Overwrite with the new (confirmed) values.
         Both writes share one commit → atomic.
         """
-        # -- Step 1: fetch the current row so we snapshot what is in the DB,
-        #            not what the client just sent.
         self.db.row_factory = aiosqlite.Row
         async with self.db.execute(
             "SELECT rubric, parsed_paper FROM papers WHERE paper_id = ?",
@@ -78,7 +83,6 @@ class PaperRepository:
             row = await cur.fetchone()
 
         if row and row["rubric"] is not None:
-            # Only snapshot when there is already data worth preserving.
             history_repo = HistoryRepository(self.db)
             await history_repo.save_rubric_snapshot(
                 paper_id=paper_id,
@@ -87,7 +91,6 @@ class PaperRepository:
                 action="confirm",
             )
 
-        # -- Step 2: write the new confirmed state.
         await self.db.execute(
             """
             UPDATE papers
@@ -102,11 +105,12 @@ class PaperRepository:
                 paper_id,
             ),
         )
-        await self.db.commit()   # single commit covers both writes
+        await self.db.commit()
 
     async def list_all(self) -> list[PaperSummary]:
         async with self.db.execute(
-            "SELECT paper_id, sha256_hash, parsed_paper, rubric, confirmed FROM papers ORDER BY created_at DESC"
+            "SELECT paper_id, sha256_hash, parsed_paper, rubric, confirmed "
+            "FROM papers ORDER BY created_at DESC"
         ) as cursor:
             rows = await cursor.fetchall()
             summaries = []
@@ -126,9 +130,6 @@ class PaperRepository:
             return summaries
 
     async def delete(self, paper_id: str) -> dict:
-        """Delete a paper and cascade to ocr_results and evaluations.
-        Returns counts of deleted rows for each table."""
-        # Count children before deletion for the response
         async with self.db.execute(
             "SELECT COUNT(*) FROM evaluations WHERE paper_id = ?", (paper_id,)
         ) as cur:
@@ -146,10 +147,10 @@ class PaperRepository:
 
     # ------------------------------------------------------------------
     def _row_to_detail(self, row) -> PaperDetailResponse:
-        rubric_json = row["rubric"]
+        rubric_json     = row["rubric"]
         rubric_response = None
         if rubric_json:
-            rubric = Rubric.model_validate_json(rubric_json)
+            rubric          = Rubric.model_validate_json(rubric_json)
             rubric_response = build_rubric_response(rubric)
         return PaperDetailResponse(
             paper_id=row["paper_id"],

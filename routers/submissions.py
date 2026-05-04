@@ -1,12 +1,13 @@
 """
+routers/submissions.py
+-----------------------
 Submissions router  (/api/v1/papers/{paper_id}/submissions  +  /api/v1/submissions)
 
 A "submission" is a student answer PDF that has been OCR'd.
-Internally the DB still uses the column name ocr_id; the API surface
-exposes submission_id everywhere.
+question_id is now a string throughout.
 """
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 import aiosqlite
 import uuid
 import hashlib
@@ -25,9 +26,6 @@ from models.schemas import (
     StudentInfo,
 )
 
-# Two separate routers so main.py can mount them at different prefixes:
-#   papers_router  → /api/v1/papers
-#   flat_router    → /api/v1/submissions
 papers_router = APIRouter()
 flat_router   = APIRouter()
 
@@ -54,7 +52,6 @@ def _build_submission_response(record: dict, is_duplicate: bool, message: str) -
 
 # ---------------------------------------------------------------------------
 # POST /papers/{paper_id}/submissions
-# Upload answer PDF → OCR → save
 # ---------------------------------------------------------------------------
 
 @papers_router.post(
@@ -80,7 +77,6 @@ async def create_submission(
     if not pdf_bytes:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
-    # Verify paper exists and is confirmed
     paper_repo = PaperRepository(db)
     paper = await paper_repo.find_by_id(paper_id)
     if not paper:
@@ -91,7 +87,6 @@ async def create_submission(
             detail="Question paper is not yet confirmed. Confirm it before uploading submissions.",
         )
 
-    # Duplicate check
     answer_sha256 = _sha256(pdf_bytes)
     ocr_repo = OcrRepository(db)
     existing = await ocr_repo.find_by_answer_hash(answer_sha256)
@@ -102,14 +97,16 @@ async def create_submission(
             message="This answer sheet was already uploaded. Showing existing submission.",
         )
 
-    # Run OCR
     try:
         ocr_result = await _ocr_svc.extract_answers(pdf_bytes)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Answer OCR failed: {str(exc)}")
 
     extracted_answers = [
-        ExtractedAnswer(question_id=a.question_id, answer_markdown=a.answer_markdown)
+        ExtractedAnswer(
+            question_id=a.question_id,       # already a string
+            answer_markdown=a.answer_markdown,
+        )
         for a in ocr_result.answers
     ]
     student_info = StudentInfo(
@@ -117,7 +114,6 @@ async def create_submission(
         roll_number=ocr_result.student_info.roll_number,
     )
 
-    # Persist
     submission_id = str(uuid.uuid4())
     await ocr_repo.insert(
         ocr_id=submission_id,
@@ -140,17 +136,12 @@ async def create_submission(
 
 # ---------------------------------------------------------------------------
 # GET /papers/{paper_id}/submissions
-# List all submissions for a paper
 # ---------------------------------------------------------------------------
 
 @papers_router.get(
     "/{paper_id}/submissions",
     response_model=list[SubmissionSummaryResponse],
     summary="List all submissions for a question paper",
-    description=(
-        "Returns all uploaded answer sheets for a given paper. "
-        "Each entry includes a has_evaluation flag."
-    ),
     tags=["Submissions"],
 )
 async def list_submissions(
@@ -167,14 +158,12 @@ async def list_submissions(
 
 # ---------------------------------------------------------------------------
 # GET /submissions/{submission_id}
-# Full OCR detail for a single submission
 # ---------------------------------------------------------------------------
 
 @flat_router.get(
     "/{submission_id}",
     response_model=SubmissionResponse,
     summary="Get full detail of a single submission",
-    description="Returns the complete submission record including student info and all extracted answers.",
     tags=["Submissions"],
 )
 async def get_submission(
@@ -195,17 +184,12 @@ async def get_submission(
 
 # ---------------------------------------------------------------------------
 # POST /submissions/{submission_id}:update-student-info
-# Correct student name / roll number
 # ---------------------------------------------------------------------------
 
 @flat_router.post(
     "/{submission_id}:update-student-info",
     response_model=SubmissionResponse,
     summary="Correct student info on a submission",
-    description=(
-        "Allows the examiner to correct the student name and/or roll number "
-        "extracted by OCR. Returns the full updated submission record."
-    ),
     tags=["Submissions"],
 )
 async def update_submission_student_info(
@@ -234,18 +218,12 @@ async def update_submission_student_info(
 
 # ---------------------------------------------------------------------------
 # DELETE /submissions/{submission_id}
-# Only allowed if no evaluation has been run yet
 # ---------------------------------------------------------------------------
 
 @flat_router.delete(
     "/{submission_id}",
     response_model=SubmissionDeleteResponse,
     summary="Delete a submission",
-    description=(
-        "Permanently removes a submission. "
-        "Only allowed if no evaluation has been run against it yet. "
-        "This action is irreversible."
-    ),
     tags=["Submissions"],
 )
 async def delete_submission(

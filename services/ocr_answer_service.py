@@ -1,35 +1,47 @@
+"""
+services/ocr_answer_service.py
+-------------------------------
+Extracts student answers from answer-sheet PDFs using Gemini.
+
+question_id is now a **string** to match the hierarchical IDs in the
+question paper.  The student should write the same IDs they see on the
+paper (e.g. "1a", "Q.2", "III").
+"""
+
+from __future__ import annotations
+
 import os
 from pathlib import Path
+from typing import List, Optional
+
 from google import genai
 from google.genai import types
 from pydantic import BaseModel
-from typing import List, Optional
-
-from models.schemas import StudentInfo
-
-
-# ---------------------------------------------------------------------------
-# Internal schemas for LLM structured output
-# ---------------------------------------------------------------------------
 
 from services.token_logger import log_token_usage
 
 
+# ---------------------------------------------------------------------------
+# Internal LLM schema
+# ---------------------------------------------------------------------------
+
 class _StudentInfo(BaseModel):
     student_name: str
-    roll_number: Optional[str] = None
+    roll_number:  Optional[str] = None
 
 
 class _Answer(BaseModel):
-    question_id: int
+    question_id:     str     # ← string (was int); matches the ID on the question paper
     answer_markdown: str
 
 
 class _AnswerSchema(BaseModel):
     student_info: _StudentInfo
-    answers: List[_Answer]
+    answers:      List[_Answer]
 
 
+# ---------------------------------------------------------------------------
+# System prompt
 # ---------------------------------------------------------------------------
 
 _SYSTEM_PROMPT_PATH = Path("./instructions/ocr_answer_system_prompt.txt")
@@ -48,6 +60,10 @@ def _load_system_prompt() -> str:
         return _SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
     return _DEFAULT_SYSTEM_PROMPT
 
+
+# ---------------------------------------------------------------------------
+# Service
+# ---------------------------------------------------------------------------
 
 class OCRAnswerService:
     def __init__(self):

@@ -1,32 +1,50 @@
+"""
+services/evaluator_service.py
+-----------------------------
+Evaluates student answers against a rubric using Gemini.
+
+Key changes from the flat-list implementation
+----------------------------------------------
+* question_id is a **string** throughout.
+* Either-or choice groups: only the branch the student actually answered
+  is evaluated; the unchosen branch is skipped entirely.
+* Best-N section selection works on string IDs.
+* MCQ deterministic scoring unchanged except for string IDs.
+* Prompt builder uses ParsedPaper.questions (leaf DFS) so all question
+  formats (nested, alphanumeric IDs) are handled transparently.
+"""
+
+from __future__ import annotations
+
 import os
 from pathlib import Path
+from typing import Dict, List, Optional, Set
+from enum import Enum
+
 from google import genai
 from google.genai import types
 from pydantic import BaseModel
-from typing import List, Optional
-from enum import Enum
 
 from services.token_logger import log_token_usage
-from models.rubric import Rubric, RubricResponse
 from models.paper import ParsedPaper
+from models.rubric import Rubric, RubricResponse
 from models.evaluation import (
-    EvaluationReport,
-    EvaluationSummary,
-    QuestionEvaluation,
     ConceptEvaluation,
     ConceptVerdict,
+    EvaluationReport,
+    ExtractedAnswer,
+    QuestionEvaluation,
     StudentInfo,
-    build_evaluation_summary,
     _bloom_outcome,
+    build_evaluation_summary,
 )
 
 
 # ---------------------------------------------------------------------------
-# Internal schema for LLM structured output
+# Internal LLM schema
 # ---------------------------------------------------------------------------
 
 class _EvaluationSummary(BaseModel):
-    """Gemini only generates overall_feedback — totals are computed in Python."""
     overall_feedback: str
 
 
@@ -37,27 +55,27 @@ class _ConceptVerdict(str, Enum):
 
 
 class _ConceptEvaluation(BaseModel):
-    """Gemini only judges the verdict — marks are computed in Python."""
     concept_name: str
-    verdict: _ConceptVerdict
-    reason: str
+    verdict:      _ConceptVerdict
+    reason:       str
 
 
 class _QuestionEvaluation(BaseModel):
-    question_id: int
-    maximum_marks: float
-    concept_evaluations: List[_ConceptEvaluation]
-    justification: str
-    strengths: Optional[List[str]] = None
-    areas_for_improvement: Optional[List[str]] = None
+    question_id:            str     # ← string
+    maximum_marks:          float
+    concept_evaluations:    List[_ConceptEvaluation]
+    justification:          str
+    strengths:              Optional[List[str]] = None
+    areas_for_improvement:  Optional[List[str]] = None
 
 
 class _EvaluationReport(BaseModel):
-    """student_info is omitted — already captured by OCR, not Gemini's responsibility."""
-    evaluation_summary: _EvaluationSummary
+    evaluation_summary:       _EvaluationSummary
     question_wise_evaluation: List[_QuestionEvaluation]
 
 
+# ---------------------------------------------------------------------------
+# System prompt
 # ---------------------------------------------------------------------------
 
 _SYSTEM_PROMPT_PATH = Path("./instructions/eval_system_prompt.txt")
@@ -66,52 +84,63 @@ _SYSTEM_PROMPT_PATH = Path("./instructions/eval_system_prompt.txt")
 def _load_system_prompt() -> str:
     if not _SYSTEM_PROMPT_PATH.exists():
         raise FileNotFoundError(
-            f"Eval system prompt not found at {_SYSTEM_PROMPT_PATH}. "
-            "Please ensure instructions/eval_system_prompt.txt exists."
+            f"Eval system prompt not found at {_SYSTEM_PROMPT_PATH}."
         )
     return _SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
 
 
+# ---------------------------------------------------------------------------
+# Prompt builder
+# ---------------------------------------------------------------------------
+
 def _build_evaluation_prompt(
     parsed_paper: ParsedPaper,
-    rubric: Rubric | RubricResponse,
-    answers: list,
+    rubric:       Rubric | RubricResponse,
+    answers:      List[ExtractedAnswer],
     student_info: StudentInfo,
 ) -> str:
     """
-    Builds the markdown prompt combining questions, rubric, and student answers.
+    Build the Gemini evaluation prompt.
+
+    Only questions that the student actually answered (present in `answers`)
+    are included.  Group/parent nodes never appear because parsed_paper.questions
+    returns only leaves.
     """
-    rubric_lookup = {q.question_id: q for q in rubric.questions}
-    answer_lookup = {a.question_id: a.answer_markdown for a in answers}
+    rubric_lookup  = {q.question_id: q for q in rubric.questions}
+    answer_lookup  = {a.question_id: a.answer_markdown for a in answers}
 
     lines = ["# Student Evaluation Data\n"]
     lines.append(f"**Student Name:** {student_info.student_name}")
     lines.append(f"**Roll Number:** {student_info.roll_number or 'N/A'}\n")
 
-    for q in parsed_paper.questions:
-        q_id = q.question_id
+    for leaf in parsed_paper.questions:    # DFS leaf order
+        q_id = leaf.question_id
         if q_id not in answer_lookup:
             continue
 
         rubric_q = rubric_lookup.get(q_id)
         lines.append(f"## Question ID: {q_id}")
-        lines.append(f"**Max Score:** {q.max_score}\n")
+        if leaf.display_id:
+            lines.append(f"**Display ID:** {leaf.display_id}")
+        lines.append(f"**Max Score:** {leaf.max_score}\n")
 
         lines.append("### Question")
-        lines.append(f"{q.question_markdown}\n")
+        lines.append(f"{leaf.question_markdown}\n")
 
         lines.append("### Student Answer")
         lines.append(f"{answer_lookup[q_id]}\n")
 
         lines.append("### Rubric")
-        if rubric_q:
+        if rubric_q and rubric_q.question_type != "mcq":
             lines.append(f"**Expected Depth:** {rubric_q.expected_depth}\n")
             lines.append("#### Concepts")
-            for concept in rubric_q.concepts:
+            for concept in (rubric_q.concepts or []):
                 lines.append(f"- **Concept:** {concept.concept_name}")
                 lines.append(f"  - Description: {concept.description}")
                 lines.append(f"  - Keywords: {', '.join(concept.keywords)}")
                 lines.append(f"  - Mandatory: {concept.mandatory}")
+        elif rubric_q and rubric_q.question_type == "mcq":
+            lines.append("*MCQ — scored deterministically, not by this prompt.*\n")
         else:
             lines.append("*No rubric available for this question.*\n")
 
@@ -120,6 +149,8 @@ def _build_evaluation_prompt(
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# Service
 # ---------------------------------------------------------------------------
 
 class EvaluatorService:
@@ -134,11 +165,12 @@ class EvaluatorService:
     async def evaluate(
         self,
         parsed_paper: ParsedPaper,
-        rubric: Rubric | RubricResponse,
-        answers: list,
+        rubric:       Rubric | RubricResponse,
+        answers:      List[ExtractedAnswer],
         student_info: StudentInfo,
-        full_marks: float,
+        full_marks:   float,
     ) -> EvaluationReport:
+
         prompt = _build_evaluation_prompt(parsed_paper, rubric, answers, student_info)
 
         response = self.client.models.generate_content(
@@ -157,29 +189,51 @@ class EvaluatorService:
         log_token_usage("Evaluation", self.model, response)
         parsed = _EvaluationReport.model_validate_json(response.text)
 
-        # Build rubric lookups for deterministic mark computation
-        rubric_q_lookup = {rq.question_id: rq for rq in rubric.questions}
+        # ------------------------------------------------------------------
+        # Build lookups
+        # ------------------------------------------------------------------
+        rubric_q_lookup: Dict[str, object] = {rq.question_id: rq for rq in rubric.questions}
 
-        # Build course_outcome lookup from parsed paper questions
-        co_lookup = {
-            pq.question_id: getattr(pq, "course_outcome", None)
-            for pq in parsed_paper.questions
+        # course_outcome from parsed paper leaves
+        co_lookup: Dict[str, Optional[str]] = {
+            leaf.question_id: leaf.course_outcome
+            for leaf in parsed_paper.questions
         }
 
-        # Build answer lookup for MCQ deterministic scoring
-        answer_lookup = {a.question_id: a.answer_markdown.strip() for a in answers}
+        answer_lookup: Dict[str, str] = {
+            a.question_id: a.answer_markdown.strip() for a in answers
+        }
 
-        # Separate MCQ question IDs — these are scored in Python, not by Gemini
-        mcq_ids = {
+        # IDs of MCQ questions (scored in Python, not by Gemini)
+        mcq_ids: Set[str] = {
             rq.question_id
             for rq in rubric.questions
             if rq.question_type == "mcq"
         }
 
+        # ------------------------------------------------------------------
+        # Determine which OR-alternative branches the student actually answered.
+        # For each choice_group, only evaluate the branch(es) that have an
+        # answer; the rest are silently skipped.
+        # ------------------------------------------------------------------
+        answered_ids: Set[str] = set(answer_lookup.keys())
+
+        # Set of leaf question_ids that should be skipped (unanswered OR branch)
+        skip_ids: Set[str] = set()
+        if parsed_paper.choice_groups:
+            for cg in parsed_paper.choice_groups:
+                answered_in_group = [qid for qid in cg.question_ids if qid in answered_ids]
+                unanswered_in_group = [qid for qid in cg.question_ids if qid not in answered_ids]
+                # Skip unanswered branches entirely
+                skip_ids.update(unanswered_in_group)
+
+        # ------------------------------------------------------------------
+        # Helper: concept-level mark computation
+        # ------------------------------------------------------------------
         def _concept_marks(
-            verdict: _ConceptVerdict,
+            verdict:         _ConceptVerdict,
             marks_allocated: float,
-            partial_pct: float,
+            partial_pct:     float,
         ) -> float:
             if verdict == _ConceptVerdict.correct:
                 return marks_allocated
@@ -188,16 +242,19 @@ class EvaluatorService:
             else:
                 return 0.0
 
-        question_wise = []
+        question_wise: List[QuestionEvaluation] = []
 
-        # ── MCQ scoring — pure Python, no Gemini ─────────────────────────────
+        # ------------------------------------------------------------------
+        # MCQ scoring — pure Python
+        # ------------------------------------------------------------------
         for rq in rubric.questions:
             if rq.question_type != "mcq":
+                continue
+            if rq.question_id in skip_ids:
                 continue
 
             correct_options = rq.correct_options or []
 
-            # Normalise a label to just its leading letter (e.g. "B. Decision Tree" → "B")
             def _label(s: str) -> str:
                 s = s.strip()
                 if s and s[0].isalpha() and len(s) > 1 and s[1] in (".", ")"):
@@ -206,7 +263,6 @@ class EvaluatorService:
 
             correct_labels = {_label(c) for c in correct_options}
 
-            # Get student's selected labels from OCR
             student_answer = next(
                 (a for a in answers if a.question_id == rq.question_id), None
             )
@@ -214,20 +270,17 @@ class EvaluatorService:
             if raw_labels:
                 student_labels = {_label(l) for l in raw_labels}
             elif student_answer:
-                # Fallback: try to parse from answer_markdown
                 student_labels = {_label(student_answer.answer_markdown.strip())}
             else:
                 student_labels = set()
 
-            # Full marks only if selection exactly matches correct set (no partial credit)
             is_correct    = student_labels == correct_labels and len(student_labels) > 0
             marks_awarded = rq.total_marks if is_correct else 0.0
             verdict_str   = "correct" if is_correct else "incorrect"
 
-            # Human-readable answer display
-            student_display  = ", ".join(sorted(student_labels)) if student_labels else "(no answer)"
-            correct_display  = ", ".join(sorted(correct_labels))
-            multi_note       = " (multi-select)" if rq.is_multi_select else ""
+            student_display = ", ".join(sorted(student_labels)) if student_labels else "(no answer)"
+            correct_display = ", ".join(sorted(correct_labels))
+            multi_note      = " (multi-select)" if rq.is_multi_select else ""
 
             mcq_eval = ConceptEvaluation(
                 concept_name=f"MCQ Answer{multi_note}",
@@ -260,18 +313,23 @@ class EvaluatorService:
                 )
             )
 
-        # ── Descriptive scoring — via Gemini ─────────────────────────────────
+        # ------------------------------------------------------------------
+        # Descriptive scoring — via Gemini
+        # ------------------------------------------------------------------
         for qe in parsed.question_wise_evaluation:
             if qe.question_id in mcq_ids:
-                continue   # already scored above
+                continue
+            if qe.question_id in skip_ids:
+                continue
+
             rubric_q    = rubric_q_lookup.get(qe.question_id)
             partial_pct = (
                 rubric_q.partial_marking_rule.partial_explanation_percentage / 100
-                if rubric_q else 0.5
+                if rubric_q and rubric_q.partial_marking_rule else 0.5
             )
             concept_lookup = (
                 {c.concept_name: c.marks_allocated for c in rubric_q.concepts}
-                if rubric_q else {}
+                if rubric_q and rubric_q.concepts else {}
             )
 
             concept_evals = [
@@ -290,7 +348,8 @@ class EvaluatorService:
             ]
 
             q_marks_awarded = sum(c.marks_awarded for c in concept_evals)
-            bloom_depth = rubric_q.expected_depth.value if rubric_q else None
+            bloom_depth     = rubric_q.expected_depth.value if rubric_q and rubric_q.expected_depth else None
+
             question_wise.append(
                 QuestionEvaluation(
                     question_id=qe.question_id,
@@ -306,41 +365,34 @@ class EvaluatorService:
                 )
             )
 
-        # ── Best-N selection per section ────────────────────────────────────────
-        # If the paper has sections with required_count < total questions offered,
-        # a student may have answered more than required.
-        # Mark excess answers as counted=False — only the best N (by marks) count.
-
+        # ------------------------------------------------------------------
+        # Best-N selection per section (string IDs)
+        # ------------------------------------------------------------------
         if parsed_paper.sections:
-            qe_by_id = {qe.question_id: qe for qe in question_wise}
+            qe_by_id: Dict[str, QuestionEvaluation] = {
+                qe.question_id: qe for qe in question_wise
+            }
 
             for section in parsed_paper.sections:
-                # Which of this section's questions did the student actually attempt?
                 attempted_in_section = [
                     qe_by_id[qid]
                     for qid in section.question_ids
                     if qid in qe_by_id
                 ]
-
                 if len(attempted_in_section) <= section.required_count:
-                    # Student answered at most the required number — all count
                     continue
 
-                # Student answered more than required — pick best N by marks_awarded
-                # (highest first; ties broken by question_id for determinism)
                 ranked = sorted(
                     attempted_in_section,
                     key=lambda q: (-q.marks_awarded, q.question_id),
                 )
                 counted_ids = {q.question_id for q in ranked[: section.required_count]}
-
-                # Mark excess questions
                 for qe in attempted_in_section:
                     if qe.question_id not in counted_ids:
                         qe.counted = False
 
         return EvaluationReport(
-            student_info=student_info,      # from OCR — not re-parsed from Gemini
+            student_info=student_info,
             extracted_answers=[],           # populated by the router after OCR
             evaluation_summary=build_evaluation_summary(
                 overall_feedback=parsed.evaluation_summary.overall_feedback,

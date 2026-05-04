@@ -1,3 +1,14 @@
+"""
+models/evaluation.py
+--------------------
+Evaluation data models.
+
+question_id is now a **string** throughout to match the hierarchical
+QuestionNode IDs introduced in models/paper.py.
+"""
+
+from __future__ import annotations
+
 from pydantic import BaseModel
 from typing import Dict, List, Optional
 from enum import Enum
@@ -9,41 +20,29 @@ from enum import Enum
 
 class StudentInfo(BaseModel):
     student_name: str
-    roll_number: Optional[str] = None
+    roll_number:  Optional[str] = None
 
 
 class BloomOutcome(str, Enum):
-    """
-    Per-question Bloom's taxonomy outcome — computed in Python from marks.
-    correct  (green)  : marks_awarded == maximum_marks
-    partial  (yellow) : 0 < marks_awarded < maximum_marks
-    incorrect (red)   : marks_awarded == 0
-    """
-    correct   = "correct"    # full marks — green
-    partial   = "partial"    # some marks — yellow
-    incorrect = "incorrect"  # zero marks — red
+    correct   = "correct"
+    partial   = "partial"
+    incorrect = "incorrect"
 
 
 class BloomDepthStat(BaseModel):
-    """Per-Bloom's-level aggregated stats — all computed in Python."""
-    total_marks: float        # sum of maximum_marks for questions at this level
-    awarded_marks: float      # sum of marks_awarded for questions at this level
-    percentage: float         # awarded / total * 100, or 0 if no questions at this level
-    question_count: int       # number of questions at this level
+    total_marks:    float
+    awarded_marks:  float
+    percentage:     float
+    question_count: int
 
 
 class EvaluationSummary(BaseModel):
-    """
-    Storage + response model.
-    All numeric fields are computed in Python — Gemini only generates overall_feedback.
-    bloom_breakdown is keyed by ExpectedDepth value (e.g. "remember", "analyze").
-    """
-    full_marks: float
-    total_attempted: float
-    total_marks_awarded: float
-    percentage: float
-    overall_feedback: str
-    bloom_breakdown: Dict[str, BloomDepthStat] = {}
+    full_marks:           float
+    total_attempted:      float
+    total_marks_awarded:  float
+    percentage:           float
+    overall_feedback:     str
+    bloom_breakdown:      Dict[str, BloomDepthStat] = {}
 
 
 class ConceptVerdict(str, Enum):
@@ -53,41 +52,39 @@ class ConceptVerdict(str, Enum):
 
 
 class ConceptEvaluation(BaseModel):
-    concept_name: str
+    concept_name:    str
     marks_allocated: float
-    marks_awarded: float
-    verdict: ConceptVerdict
-    reason: str
+    marks_awarded:   float
+    verdict:         ConceptVerdict
+    reason:          str
 
 
 class QuestionEvaluation(BaseModel):
-    question_id: int
-    maximum_marks: float
-    marks_awarded: float
-    concept_evaluations: List[ConceptEvaluation]
-    justification: str
-    strengths: Optional[List[str]] = None
-    areas_for_improvement: Optional[List[str]] = None
-    # Populated by the evaluator service from parsed_paper — never by Gemini
-    bloom_depth: Optional[str] = None    # e.g. "analyze"  — from rubric expected_depth
-    bloom_outcome: Optional[str] = None  # "correct" | "partial" | "incorrect"
-    course_outcome: Optional[str] = None # e.g. "CO1", "CO1, CO2" — from parsed question
-    counted: bool = True                 # False if student answered more than required and
-                                         # this question was not selected as best-N
+    question_id:            str           # ← string now (was int)
+    maximum_marks:          float
+    marks_awarded:          float
+    concept_evaluations:    List[ConceptEvaluation]
+    justification:          str
+    strengths:              Optional[List[str]] = None
+    areas_for_improvement:  Optional[List[str]] = None
+    bloom_depth:            Optional[str]       = None
+    bloom_outcome:          Optional[str]       = None
+    course_outcome:         Optional[str]       = None
+    counted:                bool               = True
 
 
 class ExtractedAnswer(BaseModel):
     """One OCR-extracted answer from the student's answer sheet."""
-    question_id: int
+    question_id:     str     # ← string now (was int)
     answer_markdown: str
 
 
 class EvaluationReport(BaseModel):
     """Internal storage model — full report including OCR-extracted answers."""
-    student_info: StudentInfo
-    extracted_answers: List[ExtractedAnswer] = []
-    evaluation_summary: EvaluationSummary
-    question_wise_evaluation: List[QuestionEvaluation]
+    student_info:              StudentInfo
+    extracted_answers:         List[ExtractedAnswer]  = []
+    evaluation_summary:        EvaluationSummary
+    question_wise_evaluation:  List[QuestionEvaluation]
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +92,6 @@ class EvaluationReport(BaseModel):
 # ---------------------------------------------------------------------------
 
 def _bloom_outcome(marks_awarded: float, maximum_marks: float) -> str:
-    """Determine colour-coded outcome from raw marks."""
     if maximum_marks <= 0:
         return BloomOutcome.incorrect.value
     if marks_awarded >= maximum_marks:
@@ -112,13 +108,7 @@ def build_evaluation_summary(
 ) -> EvaluationSummary:
     """
     Compute all numeric summary fields from graded questions.
-
-    Only questions with counted=True contribute to total_marks_awarded,
-    percentage, and bloom_breakdown. Uncounted questions (excess answers
-    not selected as best-N) are excluded from all aggregates.
-
-    bloom_breakdown  — keyed by depth level (e.g. "remember", "analyze").
-                       Only levels that appear in counted questions are included.
+    Only counted=True questions contribute to totals.
     """
     counted_qs = [q for q in question_wise_evaluation if q.counted]
 
@@ -126,7 +116,6 @@ def build_evaluation_summary(
     total_awarded   = sum(q.marks_awarded  for q in counted_qs)
     percentage      = round((total_awarded / full_marks * 100), 2) if full_marks > 0 else 0.0
 
-    # Aggregate per Bloom's level — counted questions only
     bloom_totals: Dict[str, dict] = {}
     for q in counted_qs:
         depth = q.bloom_depth
@@ -160,39 +149,37 @@ def build_evaluation_summary(
 
 
 # ---------------------------------------------------------------------------
-# Submission API models  (the OCR step, exposed as "submissions" in the API)
+# Submission API models
 # ---------------------------------------------------------------------------
 
 class SubmissionResponse(BaseModel):
-    """Returned after POST /papers/{paper_id}/submissions."""
-    submission_id: str
-    paper_id: str
-    answer_sha256: str
-    is_duplicate: bool
-    student_info: StudentInfo
+    submission_id:     str
+    paper_id:          str
+    answer_sha256:     str
+    is_duplicate:      bool
+    student_info:      StudentInfo
     extracted_answers: List[ExtractedAnswer]
-    message: str
+    message:           str
 
 
 class SubmissionSummaryResponse(BaseModel):
-    """Returned in list view — one row per uploaded answer sheet."""
-    submission_id: str
-    paper_id: str
-    answer_sha256: str
-    student_name: str
-    roll_number: Optional[str]
+    submission_id:  str
+    paper_id:       str
+    answer_sha256:  str
+    student_name:   str
+    roll_number:    Optional[str]
     has_evaluation: bool
-    created_at: str
+    created_at:     str
 
 
 class SubmissionStudentInfoUpdateRequest(BaseModel):
     student_name: str
-    roll_number: Optional[str] = None
+    roll_number:  Optional[str] = None
 
 
 class SubmissionDeleteResponse(BaseModel):
     submission_id: str
-    message: str
+    message:       str
 
 
 # ---------------------------------------------------------------------------
@@ -200,40 +187,37 @@ class SubmissionDeleteResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 class EvaluateRequest(BaseModel):
-    """Body for POST /submissions/{submission_id}/evaluation:generate."""
     submission_id: str
 
 
 class EvaluationResponse(BaseModel):
-    """Returned after evaluate and on GET detail."""
-    eval_id: str
-    paper_id: str
-    submission_id: str
-    answer_sha256: str
-    is_duplicate: bool
-    student_info: StudentInfo
-    extracted_answers: List[ExtractedAnswer]
-    evaluation_summary: EvaluationSummary
-    question_wise_evaluation: List[QuestionEvaluation]
-    confirmed: bool
-    message: str
+    eval_id:                   str
+    paper_id:                  str
+    submission_id:             str
+    answer_sha256:             str
+    is_duplicate:              bool
+    student_info:              StudentInfo
+    extracted_answers:         List[ExtractedAnswer]
+    evaluation_summary:        EvaluationSummary
+    question_wise_evaluation:  List[QuestionEvaluation]
+    confirmed:                 bool
+    message:                   str
 
 
 class EvaluationSummaryResponse(BaseModel):
-    """Returned in the list view — one row per student."""
-    eval_id: str
-    paper_id: str
+    eval_id:       str
+    paper_id:      str
     submission_id: str
-    student_name: str
-    roll_number: Optional[str]
-    confirmed: bool
+    student_name:  str
+    roll_number:   Optional[str]
+    confirmed:     bool
 
 
 class EvaluationConfirmRequest(BaseModel):
-    student_info: StudentInfo
-    extracted_answers: List[ExtractedAnswer] = []
-    evaluation_summary: EvaluationSummary
-    question_wise_evaluation: List[QuestionEvaluation]
+    student_info:              StudentInfo
+    extracted_answers:         List[ExtractedAnswer]    = []
+    evaluation_summary:        EvaluationSummary
+    question_wise_evaluation:  List[QuestionEvaluation]
 
 
 class EvaluationConfirmResponse(BaseModel):
@@ -247,7 +231,7 @@ class EvaluationDeleteResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Legacy aliases — so existing internal imports (OcrResponse etc.) keep working
+# Legacy aliases
 # ---------------------------------------------------------------------------
 
 OcrResponse                 = SubmissionResponse

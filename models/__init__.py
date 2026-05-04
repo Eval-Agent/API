@@ -16,7 +16,6 @@ from models.rubric import (
 
 from models.paper import (
     PaperMetadata,
-    ParsedQuestion,
     ParsedPaper,
     PaperUploadResponse,
     PaperConfirmRequest,
@@ -56,7 +55,6 @@ __all__ = [
     "build_rubric_response",
     # paper
     "PaperMetadata",
-    "ParsedQuestion",
     "ParsedPaper",
     "PaperUploadResponse",
     "PaperConfirmRequest",

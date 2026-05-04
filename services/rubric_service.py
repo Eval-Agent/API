@@ -1,25 +1,43 @@
+"""
+services/rubric_service.py
+--------------------------
+Generates marking rubrics from OCR'd question papers using Gemini.
+
+Key changes from the flat-list implementation
+----------------------------------------------
+* question_id is a **string** throughout.
+* The rubric is generated for **leaf questions only** (nodes that students
+  actually answer).  Group/parent nodes are not rubricised.
+* Either-or alternatives (choice_group_id set) each get a full rubric entry
+  because we don't know in advance which branch a student will choose.
+* Bloom's level is normalised from the printed bloom_level on the leaf node.
+"""
+
+from __future__ import annotations
+
 import os
 from pathlib import Path
+from typing import Dict, List, Optional
+from enum import Enum
+
 from google import genai
 from google.genai import types
 from pydantic import BaseModel
-from typing import List, Optional
-from enum import Enum
 
 from services.token_logger import log_token_usage
-from models.schemas import (
-    ParsedPaper,
+from models.paper import ParsedPaper, QuestionNode
+from models.paper import Strictness
+from models.rubric import (
+    Concept,
+    ExpectedDepth,
+    PartialMarkingRule,
     Rubric,
     RubricQuestion,
-    Concept,
-    PartialMarkingRule,
-    ExpectedDepth,
-    Strictness,
 )
 
 
 # ---------------------------------------------------------------------------
-# Internal schema for LLM structured output
+# Internal LLM schema
 # ---------------------------------------------------------------------------
 
 class _ExpectedDepth(str, Enum):
@@ -32,41 +50,36 @@ class _ExpectedDepth(str, Enum):
 
 
 class _Concept(BaseModel):
-    concept_name: str
-    description: str
-    keywords: List[str]
+    concept_name:    str
+    description:     str
+    keywords:        List[str]
     marks_allocated: float
-    mandatory: bool
+    mandatory:       bool
 
 
 class _PartialMarkingRule(BaseModel):
-    keyword_only_percentage: float
+    keyword_only_percentage:       float
     partial_explanation_percentage: float
 
 
 class _RubricQuestion(BaseModel):
-    """
-    Unified rubric question schema sent to Gemini.
-    For MCQ questions: question_type="mcq", correct_options set, no concepts/depth.
-    For descriptive:   question_type="descriptive", concepts/depth set, no correct_options.
-    """
-    question_id:    int
-    question_text:  str
-    total_marks:    float
-    question_type:  str = "descriptive"           # "mcq" | "descriptive"
-    # Descriptive fields
+    question_id:          str
+    question_text:        str
+    total_marks:          float
+    question_type:        str                         = "descriptive"
     expected_depth:       Optional[_ExpectedDepth]    = None
     concepts:             Optional[List[_Concept]]    = None
     partial_marking_rule: Optional[_PartialMarkingRule] = None
-    # MCQ fields
-    correct_options:  Optional[List[str]] = None  # list of correct option labels/texts e.g. ["B"] or ["A","C"]
-    is_multi_select:  bool = False                # True if more than one option must be selected
+    correct_options:      Optional[List[str]]         = None
+    is_multi_select:      bool                        = False
 
 
 class _RubricSchema(BaseModel):
     questions: List[_RubricQuestion]
 
 
+# ---------------------------------------------------------------------------
+# System prompt
 # ---------------------------------------------------------------------------
 
 _SYSTEM_PROMPT_PATH = Path("./instructions/rubric_system_prompt.txt")
@@ -75,13 +88,16 @@ _SYSTEM_PROMPT_PATH = Path("./instructions/rubric_system_prompt.txt")
 def _load_system_prompt() -> str:
     if not _SYSTEM_PROMPT_PATH.exists():
         raise FileNotFoundError(
-            f"Rubric system prompt not found at {_SYSTEM_PROMPT_PATH}. "
-            "Please ensure instructions/rubric_system_prompt.txt exists."
+            f"Rubric system prompt not found at {_SYSTEM_PROMPT_PATH}."
         )
     return _SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
 
 
-_STRICTNESS_INSTRUCTIONS = {
+# ---------------------------------------------------------------------------
+# Strictness instructions
+# ---------------------------------------------------------------------------
+
+_STRICTNESS_INSTRUCTIONS: Dict[Strictness, str] = {
     Strictness.easy: (
         "STRICTNESS: EASY — Be lenient. Award marks generously. "
         "Partial credit should be given for any reasonable attempt. "
@@ -111,12 +127,9 @@ _STRICTNESS_INSTRUCTIONS = {
 
 # ---------------------------------------------------------------------------
 # Bloom's level normaliser
-# Maps any printed form from the question paper to a canonical ExpectedDepth.
-# Returns None if the value cannot be mapped — Gemini's choice is used instead.
 # ---------------------------------------------------------------------------
 
-# Abbreviated level maps: L1-L6 and BTL1-BTL6 follow Bloom's order
-_LEVEL_NUM_MAP: dict = {
+_LEVEL_NUM_MAP: Dict[str, str] = {
     "1": "remember",
     "2": "understand",
     "3": "apply",
@@ -125,53 +138,74 @@ _LEVEL_NUM_MAP: dict = {
     "6": "create",
 }
 
-# Full / common variant spellings → canonical value
-_BLOOM_TEXT_MAP: dict = {
-    "remember":    "remember",
-    "recall":      "remember",
-    "knowledge":   "remember",
-    "understand":  "understand",
+_BLOOM_TEXT_MAP: Dict[str, str] = {
+    "remember":      "remember",
+    "recall":        "remember",
+    "knowledge":     "remember",
+    "understand":    "understand",
     "understanding": "understand",
     "comprehension": "understand",
-    "describe":    "understand",
-    "apply":       "apply",
-    "application": "apply",
-    "analyse":     "analyze",
-    "analyze":     "analyze",
-    "analysis":    "analyze",
-    "evaluate":    "evaluate",
-    "evaluation":  "evaluate",
-    "create":      "create",
-    "synthesis":   "create",
-    "design":      "create",
+    "describe":      "understand",
+    "apply":         "apply",
+    "application":   "apply",
+    "analyse":       "analyze",
+    "analyze":       "analyze",
+    "analysis":      "analyze",
+    "evaluate":      "evaluate",
+    "evaluation":    "evaluate",
+    "create":        "create",
+    "synthesis":     "create",
+    "design":        "create",
 }
 
 
 def _normalize_bloom_level(raw: Optional[str]) -> Optional[str]:
-    """
-    Convert any printed Bloom's level string to a canonical ExpectedDepth value.
-
-    Handles:
-      Full words  : "Remember", "Analyse", "Understand"
-      L-notation  : "L1", "L3", "l6"
-      BTL-notation: "BTL1", "BTL4", "btl2"
-      Returns None if unrecognised — Gemini's output is used as fallback.
-    """
     if not raw:
         return None
     v = raw.strip().lower()
-
-    # L1–L6
     if v.startswith("l") and v[1:] in _LEVEL_NUM_MAP:
         return _LEVEL_NUM_MAP[v[1:]]
-
-    # BTL1–BTL6
     if v.startswith("btl") and v[3:] in _LEVEL_NUM_MAP:
         return _LEVEL_NUM_MAP[v[3:]]
-
-    # Full word / variant
     return _BLOOM_TEXT_MAP.get(v, None)
 
+
+# ---------------------------------------------------------------------------
+# Prompt builder — flat list of leaf questions for Gemini
+# ---------------------------------------------------------------------------
+
+def _build_rubric_input(parsed_paper: ParsedPaper) -> str:
+    """
+    Serialise only the leaf questions that need a rubric entry.
+    Group/parent nodes are excluded; either-or alternatives are included
+    (we rubricise all branches).
+    """
+    import json
+
+    leaf_questions = []
+    for leaf in parsed_paper.questions:   # .questions = all leaves DFS
+        leaf_questions.append({
+            "question_id":       leaf.question_id,
+            "question_markdown": leaf.question_markdown,
+            "max_score":         leaf.max_score,
+            "course_outcome":    leaf.course_outcome,
+            "bloom_level":       leaf.bloom_level,
+            "section_name":      leaf.section_name,
+            "question_type":     leaf.question_type,
+            "options":           leaf.options,
+            "is_or_alternative": leaf.is_or_alternative,
+            "choice_group_id":   leaf.choice_group_id,
+        })
+
+    return json.dumps({
+        "metadata": parsed_paper.metadata.model_dump(),
+        "questions": leaf_questions,
+    }, ensure_ascii=False, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# Service
+# ---------------------------------------------------------------------------
 
 class RubricService:
     def __init__(self):
@@ -182,7 +216,7 @@ class RubricService:
         self.model = os.getenv("RUBRIC_MODEL", "gemini-2.0-flash")
         self.base_system_prompt = _load_system_prompt()
 
-    def _build_prompt(self, strictness: Strictness) -> str:
+    def _build_system_prompt(self, strictness: Strictness) -> str:
         return self.base_system_prompt + "\n\n" + _STRICTNESS_INSTRUCTIONS[strictness]
 
     async def generate_rubric(
@@ -190,15 +224,21 @@ class RubricService:
         parsed_paper: ParsedPaper,
         strictness: Strictness = Strictness.medium,
     ) -> Rubric:
-        system_prompt = self._build_prompt(strictness)
+        system_prompt = self._build_system_prompt(strictness)
 
-        # Build a lookup of question_id → canonical depth from bloom_level printed
-        # on the question paper. Gemini's output is overridden where this is present.
-        bloom_override: dict = {}
-        for pq in parsed_paper.questions:
-            canonical = _normalize_bloom_level(getattr(pq, "bloom_level", None))
+        # Build Bloom's override map: question_id → canonical depth
+        bloom_override: Dict[str, str] = {}
+        for leaf in parsed_paper.questions:
+            canonical = _normalize_bloom_level(leaf.bloom_level)
             if canonical:
-                bloom_override[pq.question_id] = canonical
+                bloom_override[leaf.question_id] = canonical
+
+        # Build leaf lookup for question_type + options
+        leaf_lookup: Dict[str, QuestionNode] = {
+            leaf.question_id: leaf for leaf in parsed_paper.questions
+        }
+
+        rubric_input = _build_rubric_input(parsed_paper)
 
         response = self.client.models.generate_content(
             model=self.model,
@@ -207,19 +247,16 @@ class RubricService:
                 system_instruction=system_prompt,
                 response_json_schema=_RubricSchema.model_json_schema(),
             ),
-            contents=parsed_paper.model_dump_json(),
+            contents=rubric_input,
         )
 
         log_token_usage("Rubric generation", self.model, response)
         parsed = _RubricSchema.model_validate_json(response.text)
 
-        # Build a lookup of question_type from parsed paper
-        pq_lookup = {pq.question_id: pq for pq in parsed_paper.questions}
-
-        rubric_questions = []
+        rubric_questions: List[RubricQuestion] = []
         for q in parsed.questions:
-            pq = pq_lookup.get(q.question_id)
-            q_type = (pq.question_type if pq else None) or q.question_type or "descriptive"
+            leaf = leaf_lookup.get(q.question_id)
+            q_type = (leaf.question_type if leaf else None) or q.question_type or "descriptive"
 
             if q_type == "mcq":
                 rubric_questions.append(
@@ -230,30 +267,37 @@ class RubricService:
                         question_type="mcq",
                         correct_options=q.correct_options or [],
                         is_multi_select=q.is_multi_select,
-                        options=pq.options if pq else None,
+                        options=leaf.options if leaf else None,
                         expected_depth=None,
                         concepts=None,
                         partial_marking_rule=None,
                     )
                 )
             else:
+                # Resolve expected_depth: paper-printed bloom > Gemini's choice
+                raw_depth = q.expected_depth.value if q.expected_depth else None
+                resolved_depth = bloom_override.get(q.question_id, raw_depth) or "remember"
+
                 rubric_questions.append(
                     RubricQuestion(
                         question_id=q.question_id,
                         question_text=q.question_text,
                         total_marks=q.total_marks,
                         question_type="descriptive",
-                        expected_depth=ExpectedDepth(
-                            bloom_override.get(q.question_id, q.expected_depth.value)
-                        ) if q.expected_depth else ExpectedDepth.remember,
-                        concepts=[Concept(**c.model_dump()) for c in q.concepts] if q.concepts else [],
-                        partial_marking_rule=PartialMarkingRule(
-                            **q.partial_marking_rule.model_dump()
-                        ) if q.partial_marking_rule else PartialMarkingRule(
-                            keyword_only_percentage=0.5,
-                            partial_explanation_percentage=0.75,
+                        expected_depth=ExpectedDepth(resolved_depth),
+                        concepts=(
+                            [Concept(**c.model_dump()) for c in q.concepts]
+                            if q.concepts else []
                         ),
-                        correct_option=None,
+                        partial_marking_rule=(
+                            PartialMarkingRule(**q.partial_marking_rule.model_dump())
+                            if q.partial_marking_rule
+                            else PartialMarkingRule(
+                                keyword_only_percentage=0.5,
+                                partial_explanation_percentage=0.75,
+                            )
+                        ),
+                        correct_options=None,
                     )
                 )
 

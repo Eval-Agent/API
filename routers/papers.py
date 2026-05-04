@@ -1,3 +1,17 @@
+"""
+routers/papers.py
+-----------------
+Question Papers router.
+
+POST   /papers                              — upload PDF, OCR, return parsed paper
+POST   /papers/{paper_id}/rubric:generate   — generate rubric
+POST   /papers/{paper_id}:confirm           — confirm paper + rubric
+GET    /papers                              — list all papers
+GET    /papers/{paper_id}                   — get paper detail
+DELETE /papers/{paper_id}                   — delete paper + cascade
+GET    /papers/{paper_id}/evaluations/export.csv — CSV export
+"""
+
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query
 from fastapi.responses import StreamingResponse
 import csv
@@ -134,6 +148,7 @@ async def generate_rubric(
     return RubricGenerateResponse(
         paper_id=paper_id,
         strictness=body.strictness,
+        parsed_paper=paper.parsed_paper,
         rubric=build_rubric_response(rubric),
         message=f"Rubric generated with '{body.strictness}' strictness. Review and confirm when ready.",
     )
@@ -149,8 +164,7 @@ async def generate_rubric(
     summary="Confirm the parsed paper and rubric",
     description=(
         "Finalises a paper after the examiner reviews and optionally edits "
-        "the parsed questions and rubric. Marks the paper as confirmed. "
-        "A rubric must have been generated before confirming."
+        "the parsed questions and rubric. Marks the paper as confirmed."
     ),
     tags=["Question Papers"],
 )
@@ -175,6 +189,7 @@ async def confirm_paper(
 
     return PaperConfirmResponse(
         paper_id=paper_id,
+        parsed_paper=body.parsed_paper,
         message="Paper confirmed and saved successfully.",
     )
 
@@ -257,9 +272,9 @@ async def delete_paper(
         evaluations_deleted=counts["evaluations_deleted"],
     )
 
+
 # ---------------------------------------------------------------------------
 # GET /papers/{paper_id}/evaluations/export.csv
-# Export all student evaluations for a paper as a CSV file
 # ---------------------------------------------------------------------------
 
 @router.get(
@@ -282,7 +297,6 @@ async def export_evaluations_csv(
     ),
     db: aiosqlite.Connection = Depends(get_db),
 ):
-    # Verify paper exists
     paper_repo = PaperRepository(db)
     paper = await paper_repo.find_by_id(paper_id)
     if not paper:
@@ -304,7 +318,7 @@ async def export_evaluations_csv(
             ),
         )
 
-    # ── Bloom level → BT number mapping ─────────────────────────────────────
+    # ── Bloom level → BT number mapping ──────────────────────────────────────
     _BLOOM_TO_BT = {
         "remember":   "BT1",
         "understand": "BT2",
@@ -315,97 +329,71 @@ async def export_evaluations_csv(
         "create":     "BT6",
     }
 
-    # Build question metadata lookup from the paper (ordered by question_id)
-    paper_q_lookup = {
-        pq.question_id: pq
-        for pq in paper.parsed_paper.questions
-    }
+    # Build leaf question metadata lookup — ordered by DFS leaf traversal
+    # Use the paper's question tree for ordering, keyed by string question_id
+    leaf_nodes = paper.parsed_paper.questions   # DFS leaf list from the tree
+    all_question_ids = [leaf.question_id for leaf in leaf_nodes]
+    paper_q_lookup   = {leaf.question_id: leaf for leaf in leaf_nodes}
 
-    # ── Collect all question IDs in paper order ────────────────────────────────
-    all_question_ids: list[int] = sorted(paper_q_lookup.keys())
-
-    # Pull paper-level metadata for the fixed columns
     meta = paper.parsed_paper.metadata
-    dept   = meta.stream or ""          # e.g. "CSE/CSE(DS)"
-    degree = meta.degree or ""          # e.g. "B.Tech"
-    subject_class = meta.subject_name or ""   # e.g. "Artificial Intelligence & Machine Learning"
+    dept          = meta.stream or ""
+    degree        = meta.degree or ""
+    subject_class = meta.subject_name or ""
 
-    # ── Build CSV ─────────────────────────────────────────────────────────────
+    # ── Build CSV ──────────────────────────────────────────────────────────────
     output = io.StringIO()
     writer = csv.writer(output)
 
-    # ── Row 1: Column headers ─────────────────────────────────────────────────
-    # Fixed student-info columns + one column per question
-    header = [
-        "dept",
-        "year",
-        "enrollment no.",
-        "Name",
-        "Class",
-        "roll no",
-    ]
+    # Row 1: headers
+    header = ["dept", "year", "enrollment no.", "Name", "Class", "roll no"]
     for qid in all_question_ids:
         header.append(f"q{qid}")
-
-    # Extra summary columns after questions
     header += ["total_marks_awarded", "full_marks", "percentage", "confirmed", "overall_feedback"]
-
     writer.writerow(header)
 
-    # ── Row 2: Bloom's Taxonomy labels (fixed per paper, same for every student)
-    # Fixed columns get blank cells; question columns get BTx label
-    bloom_row = ["", "", "", "", "", ""]   # blanks for the 6 student-info columns
+    # Row 2: Bloom's Taxonomy labels
+    bloom_row = ["", "", "", "", "", ""]
     for qid in all_question_ids:
-        pq = paper_q_lookup.get(qid)
-        if pq and pq.bloom_level:
-            # bloom_level may be already normalised ("remember") or raw ("Remember", "L3", "BTL3")
-            bl = pq.bloom_level.strip().lower()
+        leaf = paper_q_lookup.get(qid)
+        if leaf and leaf.bloom_level:
+            bl = leaf.bloom_level.strip().lower()
             bt = _BLOOM_TO_BT.get(bl, "")
             if not bt:
-                # Handle L1-L6 / BTL1-BTL6 notation
                 if bl.startswith("btl") and bl[3:].isdigit():
                     bt = f"BT{bl[3:]}"
                 elif bl.startswith("l") and bl[1:].isdigit():
                     bt = f"BT{bl[1:]}"
                 else:
-                    bt = pq.bloom_level  # keep as-is if unrecognised
+                    bt = leaf.bloom_level
         else:
             bt = ""
         bloom_row.append(bt)
-
-    bloom_row += ["", "", "", "", ""]   # blanks for summary columns
+    bloom_row += ["", "", "", "", ""]
     writer.writerow(bloom_row)
 
-    # ── Row 3+: One student per row ───────────────────────────────────────────
+    # Row 3+: one student per row
     for row in rows:
         report  = row["report"]
         summary = report.evaluation_summary
 
-        # Build per-question lookup keyed by question_id
         qe_lookup = {qe.question_id: qe for qe in report.question_wise_evaluation}
 
         data = [
             dept,
             degree,
-            report.student_info.roll_number or "",   # enrollment no. (best proxy)
+            report.student_info.roll_number or "",
             report.student_info.student_name,
             subject_class,
             report.student_info.roll_number or "",
         ]
 
-        # Marks per question — in question order
         for qid in all_question_ids:
             qe = qe_lookup.get(qid)
             if qe:
-                # Show marks only for counted questions; uncounted shown as "(x)" to flag it
-                if qe.counted:
-                    data.append(qe.marks_awarded)
-                else:
-                    data.append(f"({qe.marks_awarded})")
+                data.append(qe.marks_awarded if qe.counted else f"({qe.marks_awarded})")
             else:
-                data.append("")   # question not attempted
+                data.append("")
 
-        # Summary columns
         data += [
             summary.total_marks_awarded,
             summary.full_marks,
@@ -416,7 +404,6 @@ async def export_evaluations_csv(
 
         writer.writerow(data)
 
-    # ── Stream response ───────────────────────────────────────────────────────
     output.seek(0)
     subject_slug = (
         paper.parsed_paper.metadata.subject_code.replace(" ", "_")

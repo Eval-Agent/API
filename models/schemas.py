@@ -1,4 +1,6 @@
 """
+models/schemas.py
+-----------------
 Backwards-compatibility shim.
 All symbols imported from their canonical modules and re-exported here
 so that `from models.schemas import X` keeps working everywhere.
@@ -17,7 +19,8 @@ from models.rubric import (
 from models.paper import (
     Strictness,
     PaperMetadata,
-    ParsedQuestion,
+    QuestionNode,
+    ChoiceGroup,
     ParsedPaper,
     PaperSection,
     PaperOcrResponse,
@@ -43,7 +46,7 @@ from models.evaluation import (
     ExtractedAnswer,
     EvaluationReport,
     build_evaluation_summary,
-    # Submission models (new public names)
+    # Submission models
     SubmissionResponse,
     SubmissionSummaryResponse,
     SubmissionStudentInfoUpdateRequest,
@@ -67,8 +70,9 @@ __all__ = [
     "ExpectedDepth", "Concept", "PartialMarkingRule", "RubricQuestion",
     "Rubric", "RubricResponse", "build_rubric_response",
     # paper
-    "Strictness", "PaperMetadata", "ParsedQuestion", "ParsedPaper",
-    "PaperSection", "PaperOcrResponse", "PaperUploadResponse",
+    "Strictness", "PaperMetadata", "QuestionNode", "ChoiceGroup",
+    "ParsedPaper", "PaperSection",
+    "PaperOcrResponse", "PaperUploadResponse",
     "RubricGenerateRequest", "RubricGenerateResponse",
     "PaperConfirmRequest", "PaperConfirmResponse",
     "PaperSummary", "PaperDetailResponse", "PaperDeleteResponse",
