@@ -190,6 +190,7 @@ async def confirm_paper(
     return PaperConfirmResponse(
         paper_id=paper_id,
         parsed_paper=body.parsed_paper,
+        rubric=build_rubric_response(body.rubric),
         message="Paper confirmed and saved successfully.",
     )
 

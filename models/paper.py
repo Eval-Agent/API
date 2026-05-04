@@ -273,6 +273,7 @@ class PaperConfirmRequest(BaseModel):
 class PaperConfirmResponse(BaseModel):
     paper_id: str
     parsed_paper: ParsedPaper
+    rubric: RubricResponse
     message:  str
 
 

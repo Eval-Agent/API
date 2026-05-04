@@ -1,0 +1,36 @@
+[Token Usage] OCR (questions) | model: gemini-3-flash-preview
+  input  : 3,545
+  output : 1,202
+  total  : 4,747
+
+
+
+[Token Usage] Rubric generation | model: gemini-3-flash-preview
+  input  : 1,666
+  output : 3,798
+  thinking: 1,092
+  total  : 6,556
+
+1:
+[Token Usage] OCR (answers) | model: gemini-3-flash-preview
+  input  : 6,148
+  output : 1,342
+  total  : 7,490
+
+[Token Usage] Evaluation | model: gemini-3-flash-preview
+  input  : 3,777
+  output : 2,430
+  thinking: 1,286
+  total  : 7,493
+
+2:
+[Token Usage] OCR (answers) | model: gemini-3-flash-preview
+  input  : 5,038
+  output : 583
+  total  : 5,621
+
+[Token Usage] Evaluation | model: gemini-3-flash-preview
+  input  : 2,904
+  output : 2,056
+  thinking: 1,683
+  total  : 6,643
