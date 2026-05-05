@@ -3,16 +3,17 @@ services/ocr_answer_service.py
 -------------------------------
 Extracts student answers from answer-sheet PDFs using Gemini.
 
-question_id is now a **string** to match the hierarchical IDs in the
-question paper.  The student should write the same IDs they see on the
-paper (e.g. "1a", "Q.2", "III").
+Each extracted answer keeps:
+* question_id: canonical paper question id when confidently matched;
+               otherwise the raw visible label.
+* raw_question_id: the exact visible label from the student's script.
 """
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
 from google import genai
 from google.genai import types
@@ -27,17 +28,25 @@ from services.token_logger import log_token_usage
 
 class _StudentInfo(BaseModel):
     student_name: str
-    roll_number:  Optional[str] = None
+    roll_number: Optional[str] = None
 
 
 class _Answer(BaseModel):
-    question_id:     str     # ← string (was int); matches the ID on the question paper
+    # Canonical paper question id when confidently matched; else raw label.
+    question_id: str
+    # Visible handwritten label captured from script.
+    raw_question_id: Optional[str] = None
     answer_markdown: str
 
 
 class _AnswerSchema(BaseModel):
     student_info: _StudentInfo
-    answers:      List[_Answer]
+    answers: List[_Answer]
+
+
+class QuestionContextItem(BaseModel):
+    question_id: str
+    question_text: str
 
 
 # ---------------------------------------------------------------------------
@@ -74,17 +83,42 @@ class OCRAnswerService:
         self.model = os.getenv("OCR_MODEL", "gemini-2.0-flash-lite")
         self.system_prompt = _load_system_prompt()
 
-    async def extract_answers(self, pdf_bytes: bytes) -> _AnswerSchema:
+    def _build_context_block(self, question_context: Sequence[QuestionContextItem]) -> str:
+        """Inject canonical question-id context used for semantic id assignment."""
+        lines = [
+            "QUESTION_CONTEXT_FOR_CANONICAL_MAPPING",
+            "Use only these canonical paper question IDs when assigning answers.question_id:",
+        ]
+        for item in question_context:
+            qid = (item.question_id or "").strip()
+            qtxt = (item.question_text or "").strip()
+            if not qid:
+                continue
+            lines.append(f"- {qid}: {qtxt}")
+        return "\n".join(lines)
+
+    async def extract_answers(
+        self,
+        pdf_bytes: bytes,
+        question_context: Optional[Sequence[QuestionContextItem]] = None,
+    ) -> _AnswerSchema:
         """
-        Returns the raw parsed schema so the orchestrator can access
-        both student_info and the answers list.
+        Returns raw parsed schema so orchestrator can access
+        both student_info and answers.
         """
+        context_items = [q for q in (question_context or []) if q.question_id.strip()]
+        system_instruction = self.system_prompt
+        if context_items:
+            system_instruction = (
+                f"{self.system_prompt}\n\n{self._build_context_block(context_items)}"
+            )
+
         response = self.client.models.generate_content(
             model=self.model,
             config=types.GenerateContentConfig(
                 thinking_config=types.ThinkingConfig(thinking_level="minimal"),
                 media_resolution="MEDIA_RESOLUTION_HIGH",
-                system_instruction=self.system_prompt,
+                system_instruction=system_instruction,
                 response_json_schema=_AnswerSchema.model_json_schema(),
             ),
             contents=[

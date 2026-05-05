@@ -130,3 +130,6 @@ Expect original design, construction, or synthesis.
 Award "correct"   : proposes or constructs something with clear original thought.
 Award "partial"   : adapts an existing solution with minor modifications.
 Award "incorrect" : only describes a known solution with no creative contribution.
+
+LANGUAGE SUPPORT:
+Input may be in English or regional languages (e.g., Hindi, Marathi, Tamil, Telugu, Kannada, Bengali, Gujarati, Malayalam, Punjabi, Odia). Preserve original language in concept descriptions and evaluation reasons/feedback where feasible; do not force English translation.

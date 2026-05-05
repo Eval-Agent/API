@@ -17,6 +17,7 @@ Key changes from the flat-list implementation
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 from enum import Enum
@@ -93,6 +94,118 @@ def _load_system_prompt() -> str:
 # Prompt builder
 # ---------------------------------------------------------------------------
 
+
+
+def _normalize_question_id(qid: str) -> str:
+    """Best-effort canonical form for cross-service question-id matching."""
+    v = (qid or "").strip()
+    if not v:
+        return v
+    v = v.replace(" ", "")
+    if v.startswith("(") and v.endswith(")") and len(v) > 2:
+        v = v[1:-1]
+    v = v.replace("Q.", "Q").replace("q.", "q")
+    v = v.strip("()[]{}.:;")
+    return v.upper()
+
+
+def _question_id_match_keys(qid: str) -> List[str]:
+    """Return normalized ID shapes that may represent the same visible label."""
+    raw = (qid or "").strip()
+    keys: List[str] = []
+
+    def add(value: str) -> None:
+        key = _normalize_question_id(value)
+        if key and key not in keys:
+            keys.append(key)
+
+    add(raw)
+    add(re.sub(r"[\s)\]\}.:;]+$", "", raw))
+    add(re.sub(r"^[\s(\[\{]+", "", raw))
+    add(re.sub(r"[\s()\[\]{}.:;]+", "", raw))
+
+    tokens = re.findall(r"[A-Za-z]+|\d+|[\u0980-\u09FF]+", raw)
+    if tokens:
+        add("".join(tokens))
+        if len(tokens) >= 2:
+            add("".join(tokens[-2:]))
+        add(tokens[-1])
+
+    return keys
+
+
+def _build_answer_alias_map(parsed_paper: ParsedPaper, answers: List[ExtractedAnswer]) -> Dict[str, str]:
+    """Map raw OCR answer IDs to canonical paper question IDs."""
+    paper_ids = [leaf.question_id for leaf in parsed_paper.questions]
+    normalized_to_paper = {_normalize_question_id(pid): pid for pid in paper_ids}
+
+    alias_map: Dict[str, str] = {}
+    for ans in answers:
+        raw = ans.question_id
+        raw_keys = _question_id_match_keys(raw)
+        direct_match = next(
+            (normalized_to_paper[key] for key in raw_keys if key in normalized_to_paper),
+            None,
+        )
+        if direct_match:
+            alias_map[raw] = direct_match
+            continue
+
+        # Common OCR case: answer sheet writes subquestion labels as a/b/c...
+        letter_keys = [key for key in raw_keys if len(key) == 1 and key.isalpha()]
+        for norm in letter_keys:
+            suffix_matches = [pid for pid in paper_ids if _normalize_question_id(pid).endswith(norm)]
+            if len(suffix_matches) == 1:
+                alias_map[raw] = suffix_matches[0]
+                break
+
+            # Prefer first top-level numeric prefix (e.g., 1a, 1b, ...)
+            numeric_pref = [pid for pid in suffix_matches if pid and pid[0].isdigit()]
+            if len(numeric_pref) == 1:
+                alias_map[raw] = numeric_pref[0]
+                break
+        if raw in alias_map:
+            continue
+
+        alias_map[raw] = raw
+
+    return alias_map
+
+
+def _build_canonical_answer_lookup(
+    parsed_paper: ParsedPaper,
+    rubric: Rubric | RubricResponse,
+    answers: List[ExtractedAnswer],
+) -> Dict[str, str]:
+    """
+    Map OCR answer IDs to canonical paper IDs and merge duplicate fragments.
+
+    This intentionally does not infer the question from answer content. OCR is
+    responsible for preserving the visible answer-script structure; evaluation
+    only normalizes identifiers so IDs like "a" can match paper IDs like "1a".
+    """
+    alias_map = _build_answer_alias_map(parsed_paper, answers)
+    paper_ids = [leaf.question_id for leaf in parsed_paper.questions]
+    normalized_to_paper = {_normalize_question_id(pid): pid for pid in paper_ids}
+
+    answer_lookup: Dict[str, str] = {}
+    for answer in answers:
+        target_id = alias_map.get(answer.question_id, answer.question_id)
+        target_norm = _normalize_question_id(target_id)
+        if target_norm in normalized_to_paper:
+            target_id = normalized_to_paper[target_norm]
+
+        fragment = answer.answer_markdown.strip()
+        if not fragment:
+            continue
+        if target_id in answer_lookup:
+            answer_lookup[target_id] = f"{answer_lookup[target_id]}\n\n{fragment}"
+        else:
+            answer_lookup[target_id] = fragment
+
+    return answer_lookup
+
+
 def _build_evaluation_prompt(
     parsed_paper: ParsedPaper,
     rubric:       Rubric | RubricResponse,
@@ -107,7 +220,8 @@ def _build_evaluation_prompt(
     returns only leaves.
     """
     rubric_lookup  = {q.question_id: q for q in rubric.questions}
-    answer_lookup  = {a.question_id: a.answer_markdown for a in answers}
+    answer_lookup = _build_canonical_answer_lookup(parsed_paper, rubric, answers)
+    normalized_answer_lookup = {_normalize_question_id(k): v for k, v in answer_lookup.items()}
 
     lines = ["# Student Evaluation Data\n"]
     lines.append(f"**Student Name:** {student_info.student_name}")
@@ -115,7 +229,8 @@ def _build_evaluation_prompt(
 
     for leaf in parsed_paper.questions:    # DFS leaf order
         q_id = leaf.question_id
-        if q_id not in answer_lookup:
+        ans = answer_lookup.get(q_id) or normalized_answer_lookup.get(_normalize_question_id(q_id))
+        if ans is None:
             continue
 
         rubric_q = rubric_lookup.get(q_id)
@@ -128,7 +243,7 @@ def _build_evaluation_prompt(
         lines.append(f"{leaf.question_markdown}\n")
 
         lines.append("### Student Answer")
-        lines.append(f"{answer_lookup[q_id]}\n")
+        lines.append(f"{ans}\n")
 
         lines.append("### Rubric")
         if rubric_q and rubric_q.question_type != "mcq":
@@ -200,8 +315,9 @@ class EvaluatorService:
             for leaf in parsed_paper.questions
         }
 
-        answer_lookup: Dict[str, str] = {
-            a.question_id: a.answer_markdown.strip() for a in answers
+        answer_lookup = _build_canonical_answer_lookup(parsed_paper, rubric, answers)
+        normalized_to_original: Dict[str, str] = {
+            _normalize_question_id(k): k for k in answer_lookup.keys()
         }
 
         # IDs of MCQ questions (scored in Python, not by Gemini)
@@ -217,13 +333,14 @@ class EvaluatorService:
         # answer; the rest are silently skipped.
         # ------------------------------------------------------------------
         answered_ids: Set[str] = set(answer_lookup.keys())
+        answered_norm_ids: Set[str] = set(normalized_to_original.keys())
 
         # Set of leaf question_ids that should be skipped (unanswered OR branch)
         skip_ids: Set[str] = set()
         if parsed_paper.choice_groups:
             for cg in parsed_paper.choice_groups:
-                answered_in_group = [qid for qid in cg.question_ids if qid in answered_ids]
-                unanswered_in_group = [qid for qid in cg.question_ids if qid not in answered_ids]
+                answered_in_group = [qid for qid in cg.question_ids if qid in answered_ids or _normalize_question_id(qid) in answered_norm_ids]
+                unanswered_in_group = [qid for qid in cg.question_ids if qid not in answered_ids and _normalize_question_id(qid) not in answered_norm_ids]
                 # Skip unanswered branches entirely
                 skip_ids.update(unanswered_in_group)
 
@@ -263,14 +380,12 @@ class EvaluatorService:
 
             correct_labels = {_label(c) for c in correct_options}
 
-            student_answer = next(
-                (a for a in answers if a.question_id == rq.question_id), None
-            )
-            raw_labels = getattr(student_answer, "selected_option_labels", None) if student_answer else None
+            student_answer = answer_lookup.get(rq.question_id)
+            raw_labels = None
             if raw_labels:
                 student_labels = {_label(l) for l in raw_labels}
             elif student_answer:
-                student_labels = {_label(student_answer.answer_markdown.strip())}
+                student_labels = {_label(student_answer.strip())}
             else:
                 student_labels = set()
 

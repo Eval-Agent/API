@@ -60,6 +60,7 @@ class _QuestionNode(BaseModel):
     bloom_level:       Optional[str]          = None
     section_name:      Optional[str]          = None
     question_type:     str                    = "descriptive"
+    node_role:         str                    = "question"
     options:           Optional[List[str]]    = None
     children:          List["_QuestionNode"]  = Field(default_factory=list)
     choice_group_id:   Optional[str]          = None
@@ -106,7 +107,7 @@ question_tree.  Return structured JSON matching the schema provided.
 def _load_system_prompt() -> str:
     if _SYSTEM_PROMPT_PATH.exists():
         return _SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
-    return _DEFAULT_SYSTEM_PROMPT
+    # return _DEFAULT_SYSTEM_PROMPT
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +124,7 @@ def _convert_node(n: _QuestionNode) -> QuestionNode:
         bloom_level=n.bloom_level or None,
         section_name=n.section_name or None,
         question_type=n.question_type or "descriptive",
+        node_role=n.node_role or "question",
         options=n.options or None,
         children=[_convert_node(c) for c in n.children],
         choice_group_id=n.choice_group_id or None,

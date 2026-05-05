@@ -48,6 +48,7 @@ Each node in the tree is a _QuestionNode object:
   bloom_level        : e.g. "Remember" — null if not printed
   section_name       : which section this node belongs to (e.g. "Part A") — null if none
   question_type      : "descriptive" | "mcq" | "group"
+  node_role          : "question" | "heading"
   options            : list of MCQ choices exactly as printed (only for mcq nodes)
   children           : list of child _QuestionNode objects (sub-questions)
   choice_group_id    : if set, this node is one alternative in an OR choice
@@ -413,3 +414,6 @@ Do NOT split a single question incorrectly.
 Do NOT hallucinate missing questions.
 Return only what is visible in the image.
 If unsure, preserve exactly as seen.
+
+HEADING vs QUESTION RULE:
+Use node_role="heading" when text is instructional/organizational (e.g., "Section I", "Answer any 3", chapter headings) and not directly answerable. Use node_role="question" for answerable prompts.

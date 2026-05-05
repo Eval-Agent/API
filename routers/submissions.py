@@ -12,11 +12,12 @@ import aiosqlite
 import uuid
 import hashlib
 import json
+from typing import List
 
 from db.database import get_db
 from db.repository import PaperRepository
 from db.eval_repository import OcrRepository, EvaluationRepository
-from services.ocr_answer_service import OCRAnswerService
+from services.ocr_answer_service import OCRAnswerService, QuestionContextItem
 from models.schemas import (
     SubmissionResponse,
     SubmissionSummaryResponse,
@@ -34,6 +35,68 @@ _ocr_svc = OCRAnswerService()
 
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _build_question_context(paper) -> List[QuestionContextItem]:
+    items: List[QuestionContextItem] = []
+    for leaf in paper.parsed_paper.questions:
+        qid = (leaf.question_id or "").strip()
+        if not qid:
+            continue
+        items.append(
+            QuestionContextItem(
+                question_id=qid,
+                question_text=(leaf.question_markdown or "").strip(),
+            )
+        )
+    return items
+
+
+def _merge_canonical_answers(extracted_answers: List[ExtractedAnswer]) -> List[ExtractedAnswer]:
+    """
+    Merge only canonicalized duplicates (question_id != raw_question_id).
+    Raw-only answers stay separate for auditability.
+    """
+    merged: List[ExtractedAnswer] = []
+    canonical_index: dict[str, int] = {}
+
+    for answer in extracted_answers:
+        canonical_qid = (answer.question_id or "").strip()
+        raw_qid = (answer.raw_question_id or canonical_qid).strip()
+        text = (answer.answer_markdown or "").strip()
+        if not text:
+            continue
+
+        if not canonical_qid:
+            canonical_qid = raw_qid
+        if not canonical_qid:
+            continue
+
+        is_canonicalized = bool(raw_qid) and canonical_qid != raw_qid
+        if is_canonicalized and canonical_qid in canonical_index:
+            idx = canonical_index[canonical_qid]
+            prev = merged[idx]
+            prev.answer_markdown = f"{prev.answer_markdown}\n\n{text}"
+            if raw_qid:
+                existing_raw = (prev.raw_question_id or "").split(" | ")
+                if raw_qid not in existing_raw:
+                    prev.raw_question_id = (
+                        f"{prev.raw_question_id} | {raw_qid}"
+                        if prev.raw_question_id
+                        else raw_qid
+                    )
+            continue
+
+        normalized = ExtractedAnswer(
+            question_id=canonical_qid,
+            raw_question_id=raw_qid or None,
+            answer_markdown=text,
+        )
+        if is_canonicalized:
+            canonical_index[canonical_qid] = len(merged)
+        merged.append(normalized)
+
+    return merged
 
 
 def _build_submission_response(record: dict, is_duplicate: bool, message: str) -> SubmissionResponse:
@@ -98,17 +161,23 @@ async def create_submission(
         )
 
     try:
-        ocr_result = await _ocr_svc.extract_answers(pdf_bytes)
+        question_context = _build_question_context(paper)
+        ocr_result = await _ocr_svc.extract_answers(
+            pdf_bytes,
+            question_context=question_context,
+        )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Answer OCR failed: {str(exc)}")
 
-    extracted_answers = [
+    extracted_answers_raw = [
         ExtractedAnswer(
-            question_id=a.question_id,       # already a string
+            question_id=(a.question_id or "").strip() or (a.raw_question_id or "").strip(),
+            raw_question_id=(a.raw_question_id or a.question_id or "").strip() or None,
             answer_markdown=a.answer_markdown,
         )
         for a in ocr_result.answers
     ]
+    extracted_answers = _merge_canonical_answers(extracted_answers_raw)
     student_info = StudentInfo(
         student_name=ocr_result.student_info.student_name,
         roll_number=ocr_result.student_info.roll_number,

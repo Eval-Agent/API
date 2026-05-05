@@ -3,88 +3,92 @@ models/evaluation.py
 --------------------
 Evaluation data models.
 
-question_id is now a **string** throughout to match the hierarchical
-QuestionNode IDs introduced in models/paper.py.
+question_id is now a string throughout to match hierarchical
+QuestionNode IDs.
 """
 
 from __future__ import annotations
 
-from pydantic import BaseModel
-from typing import Dict, List, Optional
 from enum import Enum
+from typing import Dict, List, Optional
+
+from pydantic import BaseModel
 
 
 # ---------------------------------------------------------------------------
-# Core Models
+# Core models
 # ---------------------------------------------------------------------------
 
 class StudentInfo(BaseModel):
     student_name: str
-    roll_number:  Optional[str] = None
+    roll_number: Optional[str] = None
 
 
 class BloomOutcome(str, Enum):
-    correct   = "correct"
-    partial   = "partial"
+    correct = "correct"
+    partial = "partial"
     incorrect = "incorrect"
 
 
 class BloomDepthStat(BaseModel):
-    total_marks:    float
-    awarded_marks:  float
-    percentage:     float
+    total_marks: float
+    awarded_marks: float
+    percentage: float
     question_count: int
 
 
 class EvaluationSummary(BaseModel):
-    full_marks:           float
-    total_attempted:      float
-    total_marks_awarded:  float
-    percentage:           float
-    overall_feedback:     str
-    bloom_breakdown:      Dict[str, BloomDepthStat] = {}
+    full_marks: float
+    total_attempted: float
+    total_marks_awarded: float
+    percentage: float
+    overall_feedback: str
+    bloom_breakdown: Dict[str, BloomDepthStat] = {}
 
 
 class ConceptVerdict(str, Enum):
-    correct   = "correct"
-    partial   = "partial"
+    correct = "correct"
+    partial = "partial"
     incorrect = "incorrect"
 
 
 class ConceptEvaluation(BaseModel):
-    concept_name:    str
+    concept_name: str
     marks_allocated: float
-    marks_awarded:   float
-    verdict:         ConceptVerdict
-    reason:          str
+    marks_awarded: float
+    verdict: ConceptVerdict
+    reason: str
 
 
 class QuestionEvaluation(BaseModel):
-    question_id:            str           # ← string now (was int)
-    maximum_marks:          float
-    marks_awarded:          float
-    concept_evaluations:    List[ConceptEvaluation]
-    justification:          str
-    strengths:              Optional[List[str]] = None
-    areas_for_improvement:  Optional[List[str]] = None
-    bloom_depth:            Optional[str]       = None
-    bloom_outcome:          Optional[str]       = None
-    course_outcome:         Optional[str]       = None
-    counted:                bool               = True
+    question_id: str
+    maximum_marks: float
+    marks_awarded: float
+    concept_evaluations: List[ConceptEvaluation]
+    justification: str
+    strengths: Optional[List[str]] = None
+    areas_for_improvement: Optional[List[str]] = None
+    bloom_depth: Optional[str] = None
+    bloom_outcome: Optional[str] = None
+    course_outcome: Optional[str] = None
+    counted: bool = True
 
 
 class ExtractedAnswer(BaseModel):
     """One OCR-extracted answer from the student's answer sheet."""
-    question_id:     str     # ← string now (was int)
+    # Canonical id when matched; raw id otherwise.
+    question_id: str
+    # Visible handwritten id from the script.
+    raw_question_id: Optional[str] = None
     answer_markdown: str
 
 
 class EvaluationReport(BaseModel):
-    """Internal storage model — full report including OCR-extracted answers."""
-    student_info:              StudentInfo
-    extracted_answers:         List[ExtractedAnswer]  = []
-    evaluation_summary:        EvaluationSummary
-    question_wise_evaluation:  List[QuestionEvaluation]
+    """Internal storage model: full report including OCR-extracted answers."""
+    student_info: StudentInfo
+    extracted_answers: List[ExtractedAnswer] = []
+    evaluation_summary: EvaluationSummary
+    question_wise_evaluation: List[QuestionEvaluation]
 
 
 # ---------------------------------------------------------------------------
@@ -113,8 +117,8 @@ def build_evaluation_summary(
     counted_qs = [q for q in question_wise_evaluation if q.counted]
 
     total_attempted = sum(q.maximum_marks for q in counted_qs)
-    total_awarded   = sum(q.marks_awarded  for q in counted_qs)
-    percentage      = round((total_awarded / full_marks * 100), 2) if full_marks > 0 else 0.0
+    total_awarded = sum(q.marks_awarded for q in counted_qs)
+    percentage = round((total_awarded / full_marks * 100), 2) if full_marks > 0 else 0.0
 
     bloom_totals: Dict[str, dict] = {}
     for q in counted_qs:
@@ -123,8 +127,8 @@ def build_evaluation_summary(
             continue
         if depth not in bloom_totals:
             bloom_totals[depth] = {"total_marks": 0.0, "awarded_marks": 0.0, "question_count": 0}
-        bloom_totals[depth]["total_marks"]    += q.maximum_marks
-        bloom_totals[depth]["awarded_marks"]  += q.marks_awarded
+        bloom_totals[depth]["total_marks"] += q.maximum_marks
+        bloom_totals[depth]["awarded_marks"] += q.marks_awarded
         bloom_totals[depth]["question_count"] += 1
 
     bloom_breakdown: Dict[str, BloomDepthStat] = {
@@ -132,7 +136,8 @@ def build_evaluation_summary(
             total_marks=round(v["total_marks"], 2),
             awarded_marks=round(v["awarded_marks"], 2),
             percentage=round(v["awarded_marks"] / v["total_marks"] * 100, 2)
-                       if v["total_marks"] > 0 else 0.0,
+            if v["total_marks"] > 0
+            else 0.0,
             question_count=v["question_count"],
         )
         for depth, v in bloom_totals.items()
@@ -153,33 +158,33 @@ def build_evaluation_summary(
 # ---------------------------------------------------------------------------
 
 class SubmissionResponse(BaseModel):
-    submission_id:     str
-    paper_id:          str
-    answer_sha256:     str
-    is_duplicate:      bool
-    student_info:      StudentInfo
+    submission_id: str
+    paper_id: str
+    answer_sha256: str
+    is_duplicate: bool
+    student_info: StudentInfo
     extracted_answers: List[ExtractedAnswer]
-    message:           str
+    message: str
 
 
 class SubmissionSummaryResponse(BaseModel):
-    submission_id:  str
-    paper_id:       str
-    answer_sha256:  str
-    student_name:   str
-    roll_number:    Optional[str]
+    submission_id: str
+    paper_id: str
+    answer_sha256: str
+    student_name: str
+    roll_number: Optional[str]
     has_evaluation: bool
-    created_at:     str
+    created_at: str
 
 
 class SubmissionStudentInfoUpdateRequest(BaseModel):
     student_name: str
-    roll_number:  Optional[str] = None
+    roll_number: Optional[str] = None
 
 
 class SubmissionDeleteResponse(BaseModel):
     submission_id: str
-    message:       str
+    message: str
 
 
 # ---------------------------------------------------------------------------
@@ -191,33 +196,33 @@ class EvaluateRequest(BaseModel):
 
 
 class EvaluationResponse(BaseModel):
-    eval_id:                   str
-    paper_id:                  str
-    submission_id:             str
-    answer_sha256:             str
-    is_duplicate:              bool
-    student_info:              StudentInfo
-    extracted_answers:         List[ExtractedAnswer]
-    evaluation_summary:        EvaluationSummary
-    question_wise_evaluation:  List[QuestionEvaluation]
-    confirmed:                 bool
-    message:                   str
+    eval_id: str
+    paper_id: str
+    submission_id: str
+    answer_sha256: str
+    is_duplicate: bool
+    student_info: StudentInfo
+    extracted_answers: List[ExtractedAnswer]
+    evaluation_summary: EvaluationSummary
+    question_wise_evaluation: List[QuestionEvaluation]
+    confirmed: bool
+    message: str
 
 
 class EvaluationSummaryResponse(BaseModel):
-    eval_id:       str
-    paper_id:      str
+    eval_id: str
+    paper_id: str
     submission_id: str
-    student_name:  str
-    roll_number:   Optional[str]
-    confirmed:     bool
+    student_name: str
+    roll_number: Optional[str]
+    confirmed: bool
 
 
 class EvaluationConfirmRequest(BaseModel):
-    student_info:              StudentInfo
-    extracted_answers:         List[ExtractedAnswer]    = []
-    evaluation_summary:        EvaluationSummary
-    question_wise_evaluation:  List[QuestionEvaluation]
+    student_info: StudentInfo
+    extracted_answers: List[ExtractedAnswer] = []
+    evaluation_summary: EvaluationSummary
+    question_wise_evaluation: List[QuestionEvaluation]
 
 
 class EvaluationConfirmResponse(BaseModel):
@@ -234,7 +239,7 @@ class EvaluationDeleteResponse(BaseModel):
 # Legacy aliases
 # ---------------------------------------------------------------------------
 
-OcrResponse                 = SubmissionResponse
-OcrSummaryResponse          = SubmissionSummaryResponse
+OcrResponse = SubmissionResponse
+OcrSummaryResponse = SubmissionSummaryResponse
 OcrStudentInfoUpdateRequest = SubmissionStudentInfoUpdateRequest
-OcrDeleteResponse           = SubmissionDeleteResponse
+OcrDeleteResponse = SubmissionDeleteResponse

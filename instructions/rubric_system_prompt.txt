@@ -120,3 +120,6 @@ Design, construct, or synthesise something new.
 Describing an existing solution is insufficient.
 Typical words: Design, Construct, Propose, Formulate, Synthesise, Develop, Create.
 Mark allocation: typically 7–10 marks.
+
+LANGUAGE SUPPORT:
+Input may be in English or regional languages (e.g., Hindi, Marathi, Tamil, Telugu, Kannada, Bengali, Gujarati, Malayalam, Punjabi, Odia). Preserve original language in concept descriptions and evaluation reasons/feedback where feasible; do not force English translation.

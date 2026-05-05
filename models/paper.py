@@ -113,6 +113,7 @@ class QuestionNode(BaseModel):
     bloom_level:       Optional[str]       = None
     section_name:      Optional[str]       = None
     question_type:     str                 = "descriptive"   # "descriptive" | "mcq" | "group"
+    node_role:         str                 = "question"      # "question" | "heading"
     options:           Optional[List[str]] = None
     children:          List["QuestionNode"] = Field(default_factory=list)
     choice_group_id:   Optional[str]       = None
