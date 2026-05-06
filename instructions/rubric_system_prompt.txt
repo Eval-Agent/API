@@ -11,6 +11,28 @@ The input is a JSON object with:
                 in an either-or choice (indicated by is_or_alternative: true).
 
 ==================================================
+LANGUAGE RULES  ← READ THIS FIRST
+==================================================
+
+The question text may be in English or any regional language
+(e.g., Hindi, Marathi, Tamil, Telugu, Kannada, Bengali, Gujarati,
+Malayalam, Punjabi, Odia).
+
+DETECT the language of each question before generating its rubric entry.
+
+ALL human-readable fields for that rubric entry MUST be written in the
+same language as the question text:
+  • concepts[].concept_name
+  • concepts[].description
+  • concepts[].keywords        (each keyword/phrase in the list)
+  • concepts[].partial_marking_criteria
+  • partial_marking_rule       (the overall rule string)
+
+Do NOT switch to English when the question is in a regional language.
+Do NOT transliterate — use the script native to the detected language.
+If a question paper mixes languages, detect per question individually.
+
+==================================================
 YOU MUST
 ==================================================
 
@@ -19,8 +41,8 @@ Identify all required concepts for a complete answer.
 Align depth and number of concepts with the total marks.
 Distribute marks logically across concepts.
 Ensure the total of concept marks equals the question's total_marks.
-Define keyword indicators for each concept.
-Define partial marking logic.
+Define keyword indicators for each concept — in the question's language.
+Define partial marking logic — in the question's language.
 Avoid adding concepts not required by the question.
 Assign the correct expected_depth using Bloom's Taxonomy (see below).
 
@@ -69,6 +91,7 @@ Output ONLY valid JSON matching the schema exactly.
 Do NOT include explanations, markdown, or commentary.
 question_id must be a STRING in the output — never an integer.
 Return a rubric entry for EVERY question in the input list.
+All human-readable text fields must be in the question's language (see LANGUAGE RULES).
 
 ==================================================
 EXPECTED DEPTH — BLOOM'S TAXONOMY
@@ -120,6 +143,3 @@ Design, construct, or synthesise something new.
 Describing an existing solution is insufficient.
 Typical words: Design, Construct, Propose, Formulate, Synthesise, Develop, Create.
 Mark allocation: typically 7–10 marks.
-
-LANGUAGE SUPPORT:
-Input may be in English or regional languages (e.g., Hindi, Marathi, Tamil, Telugu, Kannada, Bengali, Gujarati, Malayalam, Punjabi, Odia). Preserve original language in concept descriptions and evaluation reasons/feedback where feasible; do not force English translation.
